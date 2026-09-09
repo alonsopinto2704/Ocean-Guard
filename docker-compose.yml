@@ -1,0 +1,52 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AI_SERVICE_URL: http://ai:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      ai:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ai:
+    build:
+      context: ai_service
+      dockerfile: Dockerfile
+    environment:
+      OCEANGUARD_MODEL_PATH: /models/espada-v1.onnx
+      OCEANGUARD_CLASSES_PATH: /models/classes.json
+      OCEANGUARD_METADATA_PATH: /models/model-metadata.json
+      OCEANGUARD_DATA_DIR: /data
+      OCEANGUARD_ALLOWED_ORIGINS: http://localhost:3000
+      OCEANGUARD_MAX_UNREVIEWED_ANALYSES: 500
+    volumes:
+      - ./ai_service/models:/models
+      - oceanguard-learning:/data
+    restart: unless-stopped
+
+  trainer:
+    build:
+      context: ai_service
+      dockerfile: Dockerfile.trainer
+    environment:
+      OCEANGUARD_DATA_DIR: /data
+      OCEANGUARD_BASE_DATASET: /training-data/marine_debris
+      OCEANGUARD_MODEL_DIR: /models
+      OCEANGUARD_MIN_NEW_REVIEWS: 50
+      OCEANGUARD_RETRAIN_POLL_SECONDS: 300
+      OCEANGUARD_RETRAIN_EPOCHS: 12
+      OCEANGUARD_MIN_F1_IMPROVEMENT: 0.005
+    volumes:
+      - ./ai_service/models:/models
+      - ./datasets:/training-data
+      - oceanguard-learning:/data
+    restart: unless-stopped
+
+volumes:
+  oceanguard-learning:

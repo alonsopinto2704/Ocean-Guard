@@ -1,0 +1,11 @@
+node_modules
+dist
+.pnpm-store
+audit
+datasets
+training_runs
+ai_service/**/__pycache__
+ai_service/**/*.pyc
+ai_service/models/*.onnx
+.env*
+.git

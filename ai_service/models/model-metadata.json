@@ -1,0 +1,8 @@
+{
+  "name": "Espada",
+  "version": "1",
+  "architecture": "Faster R-CNN MobileNetV3 FPN",
+  "trainingStatus": "NEEDS_TRAINING",
+  "metrics": null,
+  "calibrationBins": []
+}

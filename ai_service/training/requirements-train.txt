@@ -1,0 +1,5 @@
+torch>=2.5,<3
+torchvision>=0.20,<1
+pillow>=11,<13
+onnx>=1.17,<2
+onnxscript>=0.1,<1

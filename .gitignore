@@ -1,0 +1,17 @@
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+coverage/
+datasets/
+training_runs/
+ai_service/data/
+ai_service/models/*.onnx
+ai_service/models/.candidate-*/
+.DS_Store
+*.log
+pnpm.exe
+.env*
+!.env.example

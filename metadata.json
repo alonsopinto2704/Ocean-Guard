@@ -1,0 +1,6 @@
+{
+  "name": "OceanGuard AI",
+  "description": "AI-powered marine debris detection, monitoring, and response platform.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
