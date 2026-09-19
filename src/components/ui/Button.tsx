@@ -1,18 +1,18 @@
-import React from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import { Loader2 } from 'lucide-react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'outline';
 type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   loading?: boolean;
-  icon?: React.ReactNode;
-  iconRight?: React.ReactNode;
+  icon?: ReactNode;
+  iconRight?: ReactNode;
   fullWidth?: boolean;
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
@@ -31,6 +31,8 @@ const sizeStyles: Record<ButtonSize, string> = {
   lg: 'px-5 py-2.5 text-sm gap-2.5 tracking-wider font-semibold',
 };
 
+/** Shared button: variant/size system, loading spinner (replaces + disables
+ *  the icon), left/right icon slots, and 44px touch targets on mobile. */
 export function Button({
   variant = 'secondary',
   size = 'md',

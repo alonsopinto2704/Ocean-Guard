@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
@@ -7,6 +7,8 @@ import { LiveBadge, AdminBadge, CountBadge, ThreeDBadge } from '../ui/Badge';
 import { PanelLeftClose, PanelLeftOpen, Waves, X } from 'lucide-react';
 
 /* ─── Mini 3D globe for sector 00 ────────────────────────────────────────── */
+// Tiny animated canvas globe (rotating meridians + debris dot) used as the
+// portal nav icon. Honors prefers-reduced-motion by drawing a single frame.
 function MiniGlobe() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const angleRef = useRef(0);
@@ -111,6 +113,8 @@ interface SidebarProps {
 }
 
 /* ─── Sidebar ─────────────────────────────────────────────────────────────── */
+// Collapsible primary navigation. Groups routes by category, filters admin-only
+// entries by role, tracks viewport for the mobile drawer, and shows live counts.
 export function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
   const { user } = useAuth();
   const { summary } = useSystem();
@@ -126,23 +130,54 @@ export function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
     return () => query.removeEventListener('change', updateViewport);
   }, []);
 
-  const NAV: NavItem[] = [
-    { num: '00', label: 'Public 3D Portal',     path: '/portal',   badge: '3d',       special: '3d-globe' },
-    { num: '01', label: 'Command Center',        path: '/command' },
-    { num: '02', label: 'Live Monitoring 3D',    path: '/monitoring', badge: '3d' },
-    { num: '03', label: 'Debris Detections',    path: '/detections', badge: 'count', badgeCount: summary?.debrisDetected ?? 1284 },
-    { num: '04', label: 'Pollution Hotspots',   path: '/hotspots',   badge: 'count', badgeCount: summary?.activeHotspots ?? 14 },
-    { num: '05', label: 'Environmental AI',     path: '/ai' },
-    { num: '06', label: 'Cleanup Missions',     path: '/cleanup',    badge: 'count', badgeCount: summary?.cleanupMissions ?? 2 },
-    { num: '07', label: 'Data & UAV Ingestion', path: '/data' },
-    { num: '08', label: 'Sensors & Fleet',      path: '/sensors',    badge: 'fraction', badgeCount: summary?.camerasOnline ?? '14/15' },
-    { num: '09', label: 'AI Model Registry',    path: '/ai-models' },
-    { num: '10', label: 'Reports & Export',     path: '/reports' },
-    { num: '11', label: 'Admin Governance',     path: '/admin',     badge: 'admin', adminOnly: true },
-    { num: '12', label: 'System Settings',      path: '/settings' },
+  interface NavGroup {
+    category: string;
+    items: NavItem[];
+  }
+
+  // Route matrix grouped by operational category (Observe / Analyze / Respond / Admin).
+  const NAV_GROUPS: NavGroup[] = [
+    {
+      category: 'Observe',
+      items: [
+        { num: '00', label: 'Public 3D Portal',  path: '/portal',     badge: '3d', special: '3d-globe' },
+        { num: '01', label: 'Command Center',     path: '/command' },
+        { num: '02', label: 'Live Monitoring 3D', path: '/monitoring', badge: '3d' },
+        { num: '08', label: 'Sensors & Fleet',   path: '/sensors',    badge: 'fraction', badgeCount: summary?.camerasOnline ?? '—' },
+      ],
+    },
+    {
+      category: 'Analyze',
+      items: [
+        { num: '03', label: 'Debris Detections', path: '/detections', badge: 'count', badgeCount: summary?.debrisDetected !== undefined ? summary.debrisDetected : '—' },
+        { num: '04', label: 'Pollution Hotspots', path: '/hotspots',   badge: 'count', badgeCount: summary?.activeHotspots !== undefined ? summary.activeHotspots : '—' },
+        { num: '05', label: 'Environmental AI',  path: '/ai' },
+        { num: '07', label: 'Espada AI & Data',   path: '/data' },
+      ],
+    },
+    {
+      category: 'Respond',
+      items: [
+        { num: '06', label: 'Cleanup Missions',  path: '/cleanup',    badge: 'count', badgeCount: summary?.cleanupMissions !== undefined ? summary.cleanupMissions : '—' },
+        { num: '09', label: 'Reports & Export',  path: '/reports' },
+      ],
+    },
+    {
+      category: 'Admin',
+      items: [
+        { num: '10', label: 'Admin Governance',  path: '/admin',      badge: 'admin', adminOnly: true },
+        { num: '11', label: 'System Settings',   path: '/settings' },
+      ],
+    },
   ];
 
-  const visibleNav = NAV.filter(item => !item.adminOnly || user?.role === 'ADMIN');
+  // Hide admin-only items from non-ADMIN users, then drop empty groups.
+  const visibleGroups = NAV_GROUPS.map(group => ({
+    ...group,
+    items: group.items.filter(item => !item.adminOnly || user?.role === 'ADMIN'),
+  })).filter(group => group.items.length > 0);
+
+  const totalActiveSectors = visibleGroups.reduce((acc, g) => acc + g.items.length, 0);
 
   return (
     <aside
@@ -179,17 +214,15 @@ export function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
         )}
         <button
           type="button"
-          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          onClick={() => setCollapsed(c => !c)}
-          className={cn(
-            'ml-auto hidden h-9 w-9 items-center justify-center rounded text-[#83948f] hover:bg-white/5 hover:text-[#00f5d4] transition-colors cursor-pointer md:inline-flex',
-            collapsed && 'mx-auto'
-          )}
+          onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="ml-auto hidden md:flex text-[var(--ocean-text-muted)] hover:text-[#00f5d4] p-1.5 rounded transition-colors focus:outline-none focus:ring-1 focus:ring-[#00f5d4]"
         >
-          {collapsed
-            ? <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
-            : <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
-          }
+          {collapsed ? (
+            <PanelLeftOpen className="w-4 h-4" />
+          ) : (
+            <PanelLeftClose className="w-4 h-4" />
+          )}
         </button>
         <button
           type="button"
@@ -208,84 +241,93 @@ export function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
             Navigation Matrix
           </div>
           <div className="text-[10px] font-mono text-[#83948f] tracking-wider mt-0.5 uppercase">
-            {visibleNav.length} Active Sectors
+            {totalActiveSectors} Active Sectors
           </div>
         </div>
       )}
 
-      {/* ── Nav Items ────────────────────────────────────────────────────── */}
+      {/* ── Nav Groups ───────────────────────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2 scrollbar-thin">
-        {visibleNav.map((item) => {
-          const isActive = location.pathname === item.path ||
-            (item.path !== '/' && location.pathname.startsWith(item.path));
+        {visibleGroups.map((group, groupIdx) => (
+          <div key={group.category} className={cn(groupIdx > 0 && 'mt-3 pt-2 border-t border-[#3a4a46]/20')}>
+            {!collapsed && (
+              <div className="px-4 py-1 text-[9px] font-mono font-bold uppercase tracking-widest text-[var(--ocean-text-muted)]">
+                {group.category}
+              </div>
+            )}
+            {group.items.map((item) => {
+              // REDUNDANCY FIX: the exact-match check was previously duplicated
+              // in the OR chain. Exact match OR prefix match (for child routes).
+              const isActive =
+                location.pathname === item.path ||
+                (item.path !== '/' && location.pathname.startsWith(item.path + '/'));
 
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              onClick={onNavigate}
-              className={({ isActive: na }) => cn(
-                'flex min-h-11 items-center gap-3 px-4 py-2.5 transition-all duration-150 relative group',
-                'border-l-2',
-                (isActive || na)
-                  ? 'sidebar-active-item border-cyan-500 text-[var(--ocean-text)]'
-                  : 'border-transparent text-[var(--ocean-text-dim)] hover:text-[var(--ocean-text)] hover:bg-white/3',
-              )}
-            >
-              {/* Number */}
-              {!collapsed && (
-                <span className={cn(
-                  'text-[11px] font-mono w-5 flex-shrink-0 text-right',
-                  isActive ? 'text-cyan-500' : 'text-[var(--ocean-text-muted)]'
-                )}>
-                  {item.num}
-                </span>
-              )}
-
-              {/* Special: mini globe for item 00 */}
-              {item.special === '3d-globe' && !collapsed && (
-                <span className="flex-shrink-0 opacity-90">
-                  <MiniGlobe />
-                </span>
-              )}
-
-              {/* Label */}
-              {!collapsed && (
-                <span className="flex-1 text-sm font-medium min-w-0 truncate">
-                  {item.label}
-                </span>
-              )}
-
-              {collapsed && (
-                <span className="text-[10px] font-mono text-[var(--ocean-text-muted)] mx-auto">
-                  {item.num}
-                </span>
-              )}
-
-              {/* Badge */}
-              {!collapsed && item.badge && (
-                <span className="flex-shrink-0">
-                  {item.badge === 'live'     && <LiveBadge />}
-                  {item.badge === 'admin'    && <AdminBadge />}
-                  {item.badge === '3d'       && <ThreeDBadge />}
-                  {item.badge === 'count'    && item.badgeCount !== undefined && (
-                    <CountBadge count={item.badgeCount} />
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  onClick={onNavigate}
+                  title={collapsed ? `${item.num} · ${item.label}` : undefined}
+                  aria-label={`${item.num} · ${item.label}`}
+                  className={({ isActive: na }) => cn(
+                    'flex min-h-11 items-center gap-3 px-4 py-2 transition-all duration-150 relative group',
+                    'border-l-2',
+                    (isActive || na)
+                      ? 'sidebar-active-item border-cyan-500 text-[var(--ocean-text)]'
+                      : 'border-transparent text-[var(--ocean-text-dim)] hover:text-[var(--ocean-text)] hover:bg-white/3',
                   )}
-                  {item.badge === 'fraction' && item.badgeCount !== undefined && (
-                    <span className="text-[11px] font-mono px-1.5 py-0.5 rounded border border-slate-600/40 text-slate-300 bg-slate-800/60">
-                      {item.badgeCount}
+                >
+                  {/* Number */}
+                  {!collapsed && (
+                    <span className={cn(
+                      'text-[11px] font-mono w-5 flex-shrink-0 text-right',
+                      isActive ? 'text-cyan-500' : 'text-[var(--ocean-text-muted)]'
+                    )}>
+                      {item.num}
                     </span>
                   )}
-                </span>
-              )}
 
-              {/* Active indicator line */}
-              {isActive && (
-                <span className="absolute right-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-cyan-500 rounded-l" />
-              )}
-            </NavLink>
-          );
-        })}
+                  {/* Special: mini globe for item 00 */}
+                  {item.special === '3d-globe' && !collapsed && (
+                    <span className="flex-shrink-0 opacity-90">
+                      <MiniGlobe />
+                    </span>
+                  )}
+
+                  {/* Label */}
+                  {!collapsed && (
+                    <span className="flex-1 text-sm font-medium min-w-0 truncate">
+                      {item.label}
+                    </span>
+                  )}
+
+                  {collapsed && (
+                    <span className="text-[10px] font-mono text-[var(--ocean-text-muted)] mx-auto">
+                      {item.num}
+                    </span>
+                  )}
+
+                  {/* Badge */}
+                  {!collapsed && item.badge && (
+                    <span className="flex-shrink-0">
+                      {item.badge === 'live'     && <LiveBadge />}
+                      {item.badge === 'admin'    && <AdminBadge />}
+                      {item.badge === '3d'       && <ThreeDBadge />}
+                      {item.badge === 'count'    && item.badgeCount !== undefined && (
+                        <CountBadge count={item.badgeCount} />
+                      )}
+                      {item.badge === 'fraction' && item.badgeCount !== undefined && (
+                        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded border border-slate-600/40 text-slate-300 bg-slate-800/60">
+                          {item.badgeCount}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* ── User ────────────────────────────────────────────────────────── */}

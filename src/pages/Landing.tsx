@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as THREE from 'three';
 import {
-  Radar, Satellite, Waves, Cpu, Navigation, ArrowUpRight, Send,
-  Shield, CheckCircle2, AlertTriangle, Eye, Layers, Compass, Pause, Play
+  Satellite, Waves, Cpu, Navigation, ArrowUpRight,
+  Shield, Layers, Compass, Pause, Play
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
+import { Badge, DataProvenanceBadge } from '../components/ui/Badge';
 import { SkipLink } from '../components/ui/SkipLink';
+import { accessRequestsApi } from '../lib/api';
 
 const DEBRIS_LOCATIONS = [
   { lat: 28.5, lng: -140.2, risk: 'CRITICAL', label: 'Pacific Gyre Cluster', count: 312 },
@@ -322,15 +323,27 @@ export default function Landing() {
   const [orgInput, setOrgInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [authKeyFeedback, setAuthKeyFeedback] = useState<string | null>(null);
+  const [requestLoading, setRequestLoading] = useState(false);
   const [globePaused, setGlobePaused] = useState(false);
 
-  const handleAuthRequest = (e: React.FormEvent) => {
+  const handleAuthRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!orgInput || !emailInput) {
-      setAuthKeyFeedback('Please enter institutional credentials to generate the socket key.');
+    if (!orgInput.trim() || !emailInput.trim()) {
+      setAuthKeyFeedback('Please enter both your organization name and institutional email.');
       return;
     }
-    setAuthKeyFeedback(`Access request received for ${orgInput}. The OceanGuard team will review the institutional email before enabling a data stream.`);
+    setRequestLoading(true);
+    setAuthKeyFeedback(null);
+    try {
+      const res = await accessRequestsApi.create(orgInput, emailInput);
+      setAuthKeyFeedback(`Sentinel data access request registered (${res.request.id}) for ${res.request.organization}. Confirmation queued to ${res.request.email}.`);
+      setOrgInput('');
+      setEmailInput('');
+    } catch (err: any) {
+      setAuthKeyFeedback(err.message || 'Failed to submit request. Please try again.');
+    } finally {
+      setRequestLoading(false);
+    }
   };
 
   return (
@@ -353,16 +366,16 @@ export default function Landing() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00f5d4]" />
               </span>
               <span className="font-telemetry-tag text-[10px] uppercase tracking-widest text-[#00f5d4] font-bold">
-                MISSION ID: ORBITAL_BENTHIC_V4.8
+                MISSION ID: COASTAL_PILOT_V1
               </span>
               <span className="text-[#83948f]/40">|</span>
               <span className="font-data-mono-sm text-[11px] text-[#b9cac4]">
-                SENTINEL-2 & SAR INTERLEAVED // GLIDER FLEET SYNCED
+                SAMPLE TELEMETRY // ESPADA V1 INFERENCE ACTIVE
               </span>
             </div>
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded bg-[#1a202c]/70 border border-[#3a4a46]/30">
-              <span className="font-data-mono-sm text-[11px] text-[#4cd6fb] font-mono">LATENCY: 312MS</span>
-              <span className="font-telemetry-tag text-[10px] text-[#83948f]">GEO-DATUM: WGS84</span>
+              <span className="font-data-mono-sm text-[11px] text-[#4cd6fb] font-mono">LATENCY: ~10MS LOCAL ONNX</span>
+              <span className="font-telemetry-tag text-[10px] text-[#83948f]">GEODATUM: WGS84 (SAMPLE)</span>
             </div>
           </div>
 
@@ -373,7 +386,7 @@ export default function Landing() {
                 Autonomous <span className="bg-gradient-to-r from-[#00f5d4] via-[#4cd6fb] to-[#26fedc] bg-clip-text text-transparent drop-shadow-[0_0_35px_rgba(0,245,212,0.35)]">Neural Vision</span> for Pristine Oceans.
               </h1>
               <p className="font-body-lg text-sm sm:text-base text-[#b9cac4] max-w-2xl leading-relaxed">
-                Sub-millimeter optical computer vision and synthetic aperture radar deployed on autonomous swarm gliders. Engineering instantaneous target acquisition for abandoned ghost gear, polyethylene slicks, and submerged synthetic filaments across 361 million km² of oceanic abyssal surface.
+                Self-hosted local computer vision and marine telemetry for coastal litter detection. Real-time object detection and human-reviewed continual learning with the open-source Espada v1 detector—no paid AI APIs or cloud vendor lock-in.
               </p>
             </div>
 
@@ -384,17 +397,16 @@ export default function Landing() {
                   const el = document.getElementById('planetary-globe');
                   el?.scrollIntoView({ behavior: 'smooth' });
                 }}
-                className="group relative inline-flex items-center justify-between px-5 py-3.5 rounded bg-gradient-to-r from-[#00f5d4] to-[#4cd6fb] text-[#00201a] font-data-mono-md text-xs font-bold uppercase shadow-[0_0_35px_rgba(0,245,212,0.3)] transition-all duration-300 hover:shadow-[0_0_50px_rgba(0,245,212,0.55)] hover:scale-[1.01] cursor-pointer"
+                className="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded bg-gradient-to-r from-[#00f5d4] to-[#4cd6fb] text-[#00201a] font-bold text-xs uppercase tracking-wider shadow-[0_0_25px_rgba(0,245,212,0.35)] hover:shadow-[0_0_35px_rgba(0,245,212,0.6)] hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer"
               >
-                <span>Explore Planetary Debris Grid</span>
-                <Radar className="w-4 h-4 transition-transform duration-300 group-hover:rotate-45" />
+                Explore 3D Grid
+                <ArrowUpRight className="w-4 h-4" />
               </button>
               <button
-                onClick={() => navigate('/command')}
-                className="group inline-flex items-center justify-between px-5 py-3.5 rounded bg-[#242a36] text-[#dde2f3] hover:bg-[#343946] hover:text-[#00f5d4] transition-all duration-200 border border-[#3a4a46]/60 cursor-pointer"
+                onClick={() => navigate('/data')}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded bg-[#161c28] border border-[#3a4a46]/60 text-[#d7fff3] font-semibold text-xs tracking-wider hover:border-[#00f5d4]/50 hover:bg-[#242a36] transition-all cursor-pointer"
               >
-                <span className="font-data-mono-md text-xs uppercase font-medium">Launch Command Console</span>
-                <ArrowUpRight className="w-4 h-4 text-[#4cd6fb] transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                Try Espada AI Detector
               </button>
             </div>
           </div>
@@ -402,10 +414,10 @@ export default function Landing() {
           {/* Real-Time Atmospheric Ticker Strip */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-4">
             <div className="flex flex-col p-3.5 rounded bg-[#1a202c]/75 border border-[#3a4a46]/40 shadow-sm backdrop-blur-md">
-              <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">AUV Gliders Active</span>
+              <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">Sample Vessel Assets</span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="font-data-mono-xl text-2xl text-[#d7fff3] font-bold">428</span>
-                <span className="font-telemetry-tag text-[9px] text-[#00f5d4] uppercase">+14 SWARM DEP</span>
+                <span className="font-data-mono-xl text-2xl text-[#d7fff3] font-bold">3 PILOT</span>
+                <span className="font-telemetry-tag text-[9px] text-[#00f5d4] uppercase">COASTAL TRIAL</span>
               </div>
               <div className="w-full bg-[#2f3542] h-1 rounded-full mt-2 overflow-hidden">
                 <div className="bg-[#00f5d4] h-full w-[84%] animate-pulse" />
@@ -413,10 +425,10 @@ export default function Landing() {
             </div>
 
             <div className="flex flex-col p-3.5 rounded bg-[#1a202c]/75 border border-[#3a4a46]/40 shadow-sm backdrop-blur-md">
-              <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">Orbital Passes / HR</span>
+              <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">Model Checkpoint</span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="font-data-mono-xl text-2xl text-[#4cd6fb] font-bold">14.2</span>
-                <span className="font-telemetry-tag text-[9px] text-[#4cd6fb] uppercase">SENTINEL + SAR</span>
+                <span className="font-data-mono-xl text-2xl text-[#4cd6fb] font-bold">V1.0</span>
+                <span className="font-telemetry-tag text-[9px] text-[#4cd6fb] uppercase">SSDLITE320</span>
               </div>
               <div className="w-full bg-[#2f3542] h-1 rounded-full mt-2 overflow-hidden">
                 <div className="bg-[#4cd6fb] h-full w-[92%]" />
@@ -424,10 +436,10 @@ export default function Landing() {
             </div>
 
             <div className="flex flex-col p-3.5 rounded bg-[#1a202c]/75 border border-[#3a4a46]/40 shadow-sm backdrop-blur-md">
-              <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">Debris Clusters Cataloged</span>
+              <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">Cataloged Detections</span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="font-data-mono-xl text-2xl text-[#26fedc] font-bold">1,842,903</span>
-                <span className="font-telemetry-tag text-[9px] text-[#00f5d4] uppercase">VERIFIED</span>
+                <span className="font-data-mono-xl text-2xl text-[#26fedc] font-bold">SAMPLE</span>
+                <span className="font-telemetry-tag text-[9px] text-[#00f5d4] uppercase">HISTORICAL TRIAL</span>
               </div>
               <div className="w-full bg-[#2f3542] h-1 rounded-full mt-2 overflow-hidden">
                 <div className="bg-[#00dfc1] h-full w-[99%]" />
@@ -437,8 +449,8 @@ export default function Landing() {
             <div className="flex flex-col p-3.5 rounded bg-[#1a202c]/75 border border-[#3a4a46]/40 shadow-sm backdrop-blur-md">
               <span className="font-telemetry-tag text-[10px] text-[#b9cac4] uppercase tracking-wider font-bold">Inference Latency</span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="font-data-mono-xl text-2xl text-[#00f5d4] font-bold">14.2<span className="text-xs font-normal text-[#b9cac4]">ms</span></span>
-                <span className="font-telemetry-tag text-[9px] text-[#00f5d4] uppercase">EDGE-FPGA</span>
+                <span className="font-data-mono-xl text-2xl text-[#00f5d4] font-bold">8-12<span className="text-xs font-normal text-[#b9cac4]">ms</span></span>
+                <span className="font-telemetry-tag text-[9px] text-[#00f5d4] uppercase">LOCAL ONNX</span>
               </div>
               <div className="w-full bg-[#2f3542] h-1 rounded-full mt-2 overflow-hidden">
                 <div className="bg-[#00f5d4] h-full w-[70%]" />
@@ -468,10 +480,7 @@ export default function Landing() {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline-cyan" size="xs">SECTOR 00</Badge>
-              <Badge variant="live" size="xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#00f5d4] mr-1 pulse-dot inline-block" />
-                LIVE STREAM
-              </Badge>
+              <DataProvenanceBadge status="SAMPLE" label="SAMPLE DATASET" />
             </div>
           </div>
 
@@ -596,17 +605,17 @@ export default function Landing() {
             <div className="group relative rounded bg-[#1a202c] border border-[#3a4a46]/40 p-5 flex flex-col justify-between shadow-md hover:border-[#00f5d4]/50 hover:shadow-[0_0_25px_rgba(0,245,212,0.15)] transition-all">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-data-mono-sm text-[11px] text-[#00f5d4] font-bold font-mono">01 // ORBITAL</span>
+                  <span className="font-data-mono-sm text-[11px] text-[#00f5d4] font-bold font-mono">01 // SPECTRAL</span>
                   <Satellite className="w-5 h-5 text-[#4cd6fb]" />
                 </div>
-                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Multi-Spectral Orbital Eye</h3>
+                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Multi-Spectral Imaging</h3>
                 <p className="font-body-sm text-xs text-[#b9cac4] leading-relaxed">
-                  16-band multispectral satellite ingestion running custom Sun-Glint Suppression algorithms. Isolates synthetic micro-polymers from natural phytoplankton chlorophyll at 10nm resolution.
+                  Exploring multi-band coastal and satellite imagery ingestion with optical normal correction. Prototype preprocessing for isolating floating polymers and flotsam from sun glint and surface chop.
                 </p>
               </div>
               <div className="pt-4 mt-3 border-t border-[#3a4a46]/30 flex items-center justify-between font-telemetry-tag text-[10px] text-[#83948f] uppercase">
-                <span>RES: 0.12M / PIXEL</span>
-                <span className="text-[#00f5d4] font-bold">SWATH 120KM</span>
+                <span>MODE: OPTICAL PILOT</span>
+                <span className="text-[#00f5d4] font-bold">RESEARCH STAGE</span>
               </div>
             </div>
 
@@ -614,17 +623,17 @@ export default function Landing() {
             <div className="group relative rounded bg-[#1a202c] border border-[#3a4a46]/40 p-5 flex flex-col justify-between shadow-md hover:border-[#4cd6fb]/50 hover:shadow-[0_0_25px_rgba(76,214,251,0.15)] transition-all">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-data-mono-sm text-[11px] text-[#4cd6fb] font-bold font-mono">02 // SUB-SURFACE</span>
+                  <span className="font-data-mono-sm text-[11px] text-[#4cd6fb] font-bold font-mono">02 // 3D SCENE</span>
                   <Waves className="w-5 h-5 text-[#4cd6fb]" />
                 </div>
-                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Autonomous Glider Swarms</h3>
+                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Interactive 3D Monitoring</h3>
                 <p className="font-body-sm text-xs text-[#b9cac4] leading-relaxed">
-                  Continuous buoyancy-driven autonomous underwater vehicles (AUVs) navigating below turbulent surface chop. Armed with high-frequency side-scan acoustic sonars that map submerged ghost gear entanglements.
+                  Real-time Three.js procedural ocean rendering featuring wave displacement physics, surface and seabed debris inspection, boat kinematics, and atmospheric sun modeling for sample coastal missions.
                 </p>
               </div>
               <div className="pt-4 mt-3 border-t border-[#3a4a46]/30 flex items-center justify-between font-telemetry-tag text-[10px] text-[#83948f] uppercase">
-                <span>MAX DEPTH: 2,000M</span>
-                <span className="text-[#4cd6fb] font-bold">SWARM: 428 UNITS</span>
+                <span>VIEW: SURFACE / BENTHIC</span>
+                <span className="text-[#4cd6fb] font-bold">SAMPLE MISSION</span>
               </div>
             </div>
 
@@ -635,14 +644,14 @@ export default function Landing() {
                   <span className="font-data-mono-sm text-[11px] text-[#26fedc] font-bold font-mono">03 // INFERENCE</span>
                   <Cpu className="w-5 h-5 text-[#00f5d4]" />
                 </div>
-                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Pelagic-Vision-v4 Transformer</h3>
+                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Espada v1 Neural Detector</h3>
                 <p className="font-body-sm text-xs text-[#b9cac4] leading-relaxed">
-                  Proprietary deep convolutional vision transformer trained on over 14.8 million high-latitude oceanic imagery samples. Distinguishes fishing net weaves, PET bottles, and floating ropes from living oceanic wildlife.
+                  Fine-tuned SSDLite320 MobileNetV3 detector trained on open coastal litter imagery (TACO). Delivers sub-15ms local ONNX inference, normalized bounding boxes, and operator-verified continual training.
                 </p>
               </div>
               <div className="pt-4 mt-3 border-t border-[#3a4a46]/30 flex items-center justify-between font-telemetry-tag text-[10px] text-[#83948f] uppercase">
-                <span>TRAINED: 14.8M SAMPLES</span>
-                <span className="text-[#26fedc] font-bold">99.4% RECALL</span>
+                <span>ONNX RUNTIME LOCAL</span>
+                <span className="text-[#26fedc] font-bold">NO PAID APIS</span>
               </div>
             </div>
 
@@ -650,44 +659,44 @@ export default function Landing() {
             <div className="group relative rounded bg-[#1a202c] border border-[#3a4a46]/40 p-5 flex flex-col justify-between shadow-md hover:border-[#00f5d4]/50 hover:shadow-[0_0_25px_rgba(0,245,212,0.15)] transition-all">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-data-mono-sm text-[11px] text-[#00f5d4] font-bold font-mono">04 // KINETICS</span>
+                  <span className="font-data-mono-sm text-[11px] text-[#00f5d4] font-bold font-mono">04 // AUDIT</span>
                   <Navigation className="w-5 h-5 text-[#00f5d4]" />
                 </div>
-                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Automated Retrieval Intercept</h3>
+                <h3 className="font-headline-sm text-base text-[#dde2f3] font-bold">Human-in-the-Loop Review</h3>
                 <p className="font-body-sm text-xs text-[#b9cac4] leading-relaxed">
-                  Eulerian-Lagrangian hydrodynamic drift simulations factoring NOAA current vectors and real-time trade wind patterns. Automatically calculates the optimal interception vector for automated drone recovery tugs.
+                  Every inference result can be reviewed by human operators: confirm detections, reject false positives, adjust bounding boxes, or tag missed debris to create versioned training data for future retrains.
                 </p>
               </div>
               <div className="pt-4 mt-3 border-t border-[#3a4a46]/30 flex items-center justify-between font-telemetry-tag text-[10px] text-[#83948f] uppercase">
-                <span>PRECISION: ±4.2 METERS</span>
-                <span className="text-[#00f5d4] font-bold">AUTO DISPATCH</span>
+                <span>STORE: SQLITE WAL</span>
+                <span className="text-[#00f5d4] font-bold">CONTINUAL LOOP</span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ── SECTION 5: VALIDATED EMPIRICAL IMPACT ─────────────────────────── */}
+      {/* ── SECTION 5: PILOT CAPABILITIES & ROADMAP ───────────────────────── */}
       <section className="relative w-full bg-[#0e131f] px-4 sm:px-6 lg:px-12 py-16 border-b border-[#3a4a46]/30">
         <div className="max-w-7xl mx-auto flex flex-col gap-10">
           <div className="flex flex-col items-center text-center gap-2">
             <span className="font-telemetry-tag text-[10px] uppercase tracking-widest text-[#00f5d4] font-bold">
-              VALIDATED EMPIRICAL IMPACT
+              PILOT CAPABILITIES & ROADMAP
             </span>
             <h2 className="font-headline-xl text-2xl sm:text-4xl font-bold text-[#dde2f3]">
-              Defense-Grade Ecological Telemetry
+              Self-Hosted Ecological Telemetry
             </h2>
             <p className="font-body-md text-xs sm:text-sm text-[#b9cac4] max-w-xl">
-              Deployed alongside sovereign naval forces, environmental NGOs, and deep-ocean research consortiums globally.
+              Engineered with open-source models, public marine debris benchmarks, and local human-in-the-loop review.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { val: '2.4M+', title: 'Metric Tons Tracked', desc: 'Aggregated synthetic waste mapped from spatial coordinates down to benthic ocean beds.', color: '#00f5d4' },
-              { val: '99.4%', title: 'Classification Precision', desc: 'Rigorous zero-shot computer vision precision minimizing false alarms from wild marine fauna.', color: '#4cd6fb' },
-              { val: '18,400', title: 'Megafauna Safeguarded', desc: 'Direct entanglement preventions across cetaceans, sea turtles, and pelagic pelmatozoans.', color: '#26fedc' },
-              { val: '34', title: 'Coast Guards & NGOs', desc: 'Active real-time tactical API data feeds integrated into international maritime recovery fleets.', color: '#d7fff3' },
+              { val: '494+', title: 'Training Samples', desc: 'Curated coastal litter images from the open-source TACO dataset used for fine-tuning.', color: '#00f5d4' },
+              { val: '200', title: 'Held-Out Images', desc: 'Deterministic capture-batch holdout partition ensuring genuine generalization benchmarking.', color: '#4cd6fb' },
+              { val: '100%', title: 'Self-Hosted Ownership', desc: 'Runs entirely on local hardware with zero paid third-party API dependencies or subscription keys.', color: '#26fedc' },
+              { val: '1 Entry', title: 'Espada v1 Registry', desc: 'Single production model registry entry with atomic candidate evaluation and hot-reload promotion.', color: '#d7fff3' },
             ].map(c => (
               <div key={c.title} className="p-6 rounded bg-[#161c28] border border-[#3a4a46]/40 shadow-lg flex flex-col items-center text-center gap-2 hover:border-[#00f5d4]/40 transition-all">
                 <span className="font-display-hero text-3xl sm:text-4xl font-bold tracking-tight" style={{ color: c.color }}>
@@ -755,9 +764,10 @@ export default function Landing() {
             <div className="md:col-span-3">
               <button
                 type="submit"
-                className="w-full py-2 px-3 rounded bg-gradient-to-r from-[#00f5d4] to-[#4cd6fb] text-[#00201a] font-data-mono-sm text-xs font-bold uppercase tracking-wider shadow-[0_0_20px_rgba(0,245,212,0.35)] hover:shadow-[0_0_30px_rgba(0,245,212,0.6)] cursor-pointer transition-all"
+                disabled={requestLoading}
+                className="w-full py-2 px-3 rounded bg-gradient-to-r from-[#00f5d4] to-[#4cd6fb] text-[#00201a] font-data-mono-sm text-xs font-bold uppercase tracking-wider shadow-[0_0_20px_rgba(0,245,212,0.35)] hover:shadow-[0_0_30px_rgba(0,245,212,0.6)] cursor-pointer transition-all disabled:opacity-50"
               >
-                Request Access
+                {requestLoading ? 'Submitting...' : 'Request Access'}
               </button>
             </div>
           </form>

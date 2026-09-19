@@ -1,13 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpDown, CalendarDays, CheckCircle2, ChevronRight, Clock3,
-  Link2, MapPin, Play, Plus, Scale, Target, Users
+  Link2, Play, Plus, RefreshCw, Scale, Target, Users
 } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
+import { LoadingState } from '../components/ui/StateComponents';
+import { cleanupApi } from '../lib/api';
 import { getCleanupStatusColor } from '../lib/utils';
 import type { CleanupStatus, CleanupPriority } from '../types';
 
@@ -29,6 +31,7 @@ interface MissionListItem {
   progress: number;
   relatedAlertId?: string;
   sourceDetectionId?: string;
+  sourceHotspotId?: string;
   description?: string;
 }
 
@@ -42,38 +45,22 @@ interface SourceDetection {
   detectionCount: number;
 }
 
-interface CleanupLocationState {
-  sourceDetection?: SourceDetection;
+interface SourceHotspot {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  risk: CleanupPriority;
+  detections: number;
+  mass: number;
+  dominantClass?: string;
+  zoneId?: string;
 }
 
-const INITIAL_MISSIONS: MissionListItem[] = [
-  {
-    id: 'CM-204', title: 'Zone 4 Critical Debris Cluster', status: 'IN_PROGRESS', priority: 'CRITICAL',
-    zoneName: 'Zone 4', locationLabel: 'Zone 4 N · 35.1°N 158.3°W', detectionCount: 146, estimatedMassKg: 82,
-    assignedTeam: 'Coastal Team A', scheduledAt: new Date(Date.now() - 3 * 3600000).toISOString(),
-    startedAt: new Date(Date.now() - 1.5 * 3600000).toISOString(), createdAt: new Date(Date.now() - 5 * 3600000).toISOString(), createdBy: 'admin',
-    progress: 45, relatedAlertId: 'ALT-001', sourceDetectionId: 'DET-1042',
-  },
-  {
-    id: 'CM-202', title: 'Pacific Gyre Fishing Net Recovery', status: 'ASSIGNED', priority: 'HIGH',
-    zoneName: 'Zone 1', locationLabel: 'Pacific Gyre · 28.5°N 140.2°W', detectionCount: 48, estimatedMassKg: 28,
-    assignedTeam: 'Marine Ops Beta', scheduledAt: new Date(Date.now() + 2 * 3600000).toISOString(),
-    createdAt: new Date(Date.now() - 8 * 3600000).toISOString(), createdBy: 'operator', progress: 0,
-  },
-  {
-    id: 'CM-201', title: 'Zone 2 Coastal Plastic Sweep', status: 'COMPLETED', priority: 'MEDIUM',
-    zoneName: 'Zone 2', locationLabel: 'Zone 2 Inshore · 19.8°N 157.4°W', detectionCount: 62, estimatedMassKg: 24,
-    assignedTeam: 'Coastal Team B', scheduledAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    startedAt: new Date(Date.now() - 1.5 * 86400000).toISOString(), completedAt: new Date(Date.now() - 86400000 * 0.8).toISOString(),
-    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(), createdBy: 'officer', progress: 100,
-  },
-  {
-    id: 'CM-199', title: 'Oregon Shelf Metal Debris', status: 'SCHEDULED', priority: 'LOW',
-    zoneName: 'Zone 3', locationLabel: 'Oregon Shelf · 42.1°N 130.5°W', detectionCount: 18, estimatedMassKg: 8,
-    assignedTeam: 'Ops Team Gamma', scheduledAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-    createdAt: new Date(Date.now() - 24 * 3600000).toISOString(), createdBy: 'admin', progress: 0,
-  },
-];
+interface CleanupLocationState {
+  sourceDetection?: SourceDetection;
+  sourceHotspot?: SourceHotspot;
+}
 
 const PRIORITY_ORDER: Record<CleanupPriority, number> = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 
@@ -85,23 +72,69 @@ function MissionStatusIcon({ status }: { status: CleanupStatus }) {
   return <CalendarDays className={`${className} text-blue-400`} />;
 }
 
+// Cleanup missions queue: filterable/sortable mission list plus a create-mission
+// modal that can be pre-filled from a linked detection or hotspot.
 export default function Cleanup() {
   const navigate = useNavigate();
   const location = useLocation();
-  const initialSource = (location.state as CleanupLocationState | null)?.sourceDetection ?? null;
+  const locState = location.state as CleanupLocationState | null;
+  const initialSourceDetection = locState?.sourceDetection ?? null;
+  const initialSourceHotspot = locState?.sourceHotspot ?? null;
 
-  const [missions, setMissions] = useState(INITIAL_MISSIONS);
-  const [showNew, setShowNew] = useState(Boolean(initialSource));
-  const [source, setSource] = useState<SourceDetection | null>(initialSource);
-  const [newTitle, setNewTitle] = useState(initialSource ? `${initialSource.zoneName} ${initialSource.className} Recovery` : '');
-  const [priority, setPriority] = useState<CleanupPriority>(initialSource?.riskLevel ?? 'HIGH');
+  const [missions, setMissions] = useState<MissionListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [showNew, setShowNew] = useState(Boolean(initialSourceDetection || initialSourceHotspot));
+  const [sourceDet, setSourceDet] = useState<SourceDetection | null>(initialSourceDetection);
+  const [sourceHs, setSourceHs] = useState<SourceHotspot | null>(initialSourceHotspot);
+
+  const initialTitle = initialSourceDetection
+    ? `${initialSourceDetection.zoneName} ${initialSourceDetection.className} Recovery`
+    : initialSourceHotspot
+      ? `${initialSourceHotspot.name} Debris Hotspot Clean`
+      : '';
+
+  const initialPriority: CleanupPriority = initialSourceDetection?.riskLevel
+    ?? initialSourceHotspot?.risk
+    ?? 'HIGH';
+
+  const [newTitle, setNewTitle] = useState(initialTitle);
+  const [priority, setPriority] = useState<CleanupPriority>(initialPriority);
   const [team, setTeam] = useState('Coastal Team A');
-  const [description, setDescription] = useState(initialSource ? `Recover and document debris linked to ${initialSource.id}.` : '');
+  const [description, setDescription] = useState(
+    initialSourceDetection
+      ? `Recover and document debris linked to ${initialSourceDetection.id}.`
+      : initialSourceHotspot
+        ? `Clean up verified cluster ${initialSourceHotspot.id} (${initialSourceHotspot.name}) totaling ~${initialSourceHotspot.mass} kg.`
+        : ''
+  );
   const [scheduledAt, setScheduledAt] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED'>('ACTIVE');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'PAUSED'>('ACTIVE');
   const [urgentFirst, setUrgentFirst] = useState(true);
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
+
+  // Load missions and derive a progress value for any that lack one.
+  const fetchMissions = async () => {
+    setLoading(true);
+    try {
+      const res = await cleanupApi.list();
+      if (res && Array.isArray(res.missions)) {
+        setMissions(res.missions.map((m: any) => ({
+          ...m,
+          progress: typeof m.progress === 'number' ? m.progress : m.status === 'COMPLETED' ? 100 : m.status === 'IN_PROGRESS' ? 45 : 0,
+        })));
+      }
+    } catch (err: any) {
+      console.error('Failed to load missions:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMissions();
+  }, []);
 
   const stats = [
     { label: 'Total Missions', value: missions.length, color: '#00d4ff' },
@@ -110,10 +143,12 @@ export default function Cleanup() {
     { label: 'Completed', value: missions.filter(m => m.status === 'COMPLETED').length, color: '#ffaa00' },
   ];
 
+  // Apply the status filter, then optionally sort urgent priorities to the top.
   const visibleMissions = useMemo(() => {
     const filtered = missions.filter(m => {
       if (statusFilter === 'ALL') return true;
       if (statusFilter === 'COMPLETED') return m.status === 'COMPLETED';
+      if (statusFilter === 'PAUSED') return m.status === 'PAUSED';
       return !['COMPLETED', 'CANCELLED'].includes(m.status);
     });
     return urgentFirst
@@ -121,17 +156,22 @@ export default function Cleanup() {
       : filtered;
   }, [missions, statusFilter, urgentFirst]);
 
+  // Close the modal; if a detection/hotspot prefill was active, clear the
+  // router state so reloading the page doesn't reopen the form.
   const closeMissionForm = () => {
     setShowNew(false);
     setFormError('');
-    if (source) {
-      setSource(null);
+    if (sourceDet || sourceHs) {
+      setSourceDet(null);
+      setSourceHs(null);
       navigate('/cleanup', { replace: true });
     }
   };
 
+  // Reset the form to a blank mission (no linked source) and open the modal.
   const openBlankMission = () => {
-    setSource(null);
+    setSourceDet(null);
+    setSourceHs(null);
     setNewTitle('');
     setPriority('HIGH');
     setTeam('Coastal Team A');
@@ -141,36 +181,58 @@ export default function Cleanup() {
     setShowNew(true);
   };
 
-  const createMission = () => {
+  // Validate the title, POST the mission (carrying any linked source IDs),
+  // and prepend the created record to the local list.
+  const createMission = async () => {
     if (!newTitle.trim()) {
       setFormError('Add a clear mission title before creating the mission.');
       return;
     }
 
-    const newMission: MissionListItem = {
-      id: `CM-${Date.now().toString().slice(-3)}`,
-      title: newTitle.trim(), description: description.trim(),
-      status: team ? 'ASSIGNED' : 'DRAFT', priority,
-      zoneName: source?.zoneName ?? 'Unassigned zone',
-      locationLabel: source?.locationLabel ?? 'Location pending',
-      detectionCount: source?.detectionCount ?? 0,
-      estimatedMassKg: source?.estimatedMassKg ?? 0,
-      assignedTeam: team || undefined,
-      scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
-      createdAt: new Date().toISOString(), createdBy: 'current-user', progress: 0,
-      sourceDetectionId: source?.id,
-    };
-
-    setMissions(current => [newMission, ...current]);
-    setNotice(`${newMission.id} created and assigned to ${newMission.assignedTeam ?? 'the operations queue'}.`);
-    setShowNew(false);
-    setSource(null);
+    setCreating(true);
     setFormError('');
-    navigate('/cleanup', { replace: true });
+
+    try {
+      const payload: Partial<MissionListItem> = {
+        title: newTitle.trim(),
+        description: description.trim(),
+        status: team ? 'ASSIGNED' : 'DRAFT',
+        priority,
+        zoneName: sourceDet?.zoneName ?? sourceHs?.name ?? 'Coastal Zone Sector',
+        locationLabel: sourceDet?.locationLabel ?? (sourceHs ? `${sourceHs.name} (${sourceHs.lat}°N, ${sourceHs.lng}°E)` : 'Marine Surveillance Area'),
+        detectionCount: sourceDet?.detectionCount ?? sourceHs?.detections ?? 0,
+        estimatedMassKg: sourceDet?.estimatedMassKg ?? sourceHs?.mass ?? 0,
+        assignedTeam: team || undefined,
+        scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+        sourceDetectionId: sourceDet?.id,
+        sourceHotspotId: sourceHs?.id,
+      };
+
+      const created = await cleanupApi.create(payload);
+      const missionWithProgress: MissionListItem = {
+        ...(created as any),
+        progress: (created as any).progress ?? 0,
+      };
+      setMissions(curr => [missionWithProgress, ...curr]);
+      setNotice(`${created.id} created and dispatched to ${created.assignedTeam ?? 'the operations queue'}.`);
+      setShowNew(false);
+      setSourceDet(null);
+      setSourceHs(null);
+      navigate('/cleanup', { replace: true });
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to create cleanup mission.');
+    } finally {
+      setCreating(false);
+    }
   };
+
+  if (loading && missions.length === 0) {
+    return <LoadingState message="Loading cleanup missions..." size="lg" className="h-full p-8" />;
+  }
 
   return (
     <div className="p-3 sm:p-6 space-y-5 sm:space-y-6">
+      {/* Metrics Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {stats.map(s => (
           <Card key={s.label} className="py-3 px-4">
@@ -189,82 +251,215 @@ export default function Cleanup() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-[var(--ocean-text)]">Mission queue</h2>
-          <p className="mt-0.5 text-xs text-[var(--ocean-text-muted)]">Review urgent work first, then track field progress.</p>
+          <h2 className="text-sm font-semibold text-[var(--ocean-text)]">Mission Queue</h2>
+          <p className="mt-0.5 text-xs text-[var(--ocean-text-muted)]">Permanent operational records with real field verification & tracking.</p>
         </div>
-        <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={openBlankMission}>New Mission</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" icon={<RefreshCw className="w-4 h-4" />} onClick={fetchMissions}>
+            Refresh
+          </Button>
+          <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={openBlankMission}>
+            New Mission
+          </Button>
+        </div>
       </div>
 
+      {/* Filter and sorting controls */}
       <Card className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="w-full sm:max-w-xs">
-          <label htmlFor="mission-status-filter" className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--ocean-text-muted)]">Show missions</label>
-          <select id="mission-status-filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} className="w-full rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] px-3 py-2 text-sm text-[var(--ocean-text)] outline-none focus:border-cyan-500">
-            <option value="ACTIVE">Active missions</option><option value="ALL">All missions</option><option value="COMPLETED">Completed missions</option>
+          <label htmlFor="mission-status-filter" className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--ocean-text-muted)]">
+            Filter Status
+          </label>
+          <select
+            id="mission-status-filter"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as any)}
+            className="w-full px-3 py-2 text-xs rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-surface)] text-[var(--ocean-text)] outline-none focus:border-cyan-500"
+          >
+            <option value="ACTIVE">Active Operations</option>
+            <option value="ALL">All Recorded Missions</option>
+            <option value="COMPLETED">Completed Missions</option>
+            <option value="PAUSED">Paused Missions</option>
           </select>
         </div>
-        <Button variant={urgentFirst ? 'success' : 'outline'} size="sm" icon={<ArrowUpDown className="h-4 w-4" />} aria-pressed={urgentFirst} onClick={() => setUrgentFirst(value => !value)}>Urgent first</Button>
+
+        <button
+          type="button"
+          onClick={() => setUrgentFirst(v => !v)}
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-[var(--ocean-border)] hover:border-cyan-500/40 text-[var(--ocean-text)] transition-colors"
+        >
+          <ArrowUpDown className="w-3.5 h-3.5 text-cyan-400" />
+          <span>{urgentFirst ? 'Urgent Priority First' : 'Default Order'}</span>
+        </button>
       </Card>
 
+      {/* Missions List */}
       <div className="space-y-3">
-        {visibleMissions.map(m => (
-          <button key={m.id} type="button" onClick={() => navigate(`/cleanup/${m.id}`)} className="w-full rounded border border-[#3a4a46]/45 bg-[#1a202c]/85 p-4 text-left shadow-md transition-all duration-200 hover:-translate-y-px hover:border-[#00f5d4]/50 hover:shadow-[0_0_20px_rgba(0,245,212,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4cd6fb] sm:p-5" aria-label={`Open mission ${m.id}, ${m.title}, ${m.status.replace('_', ' ')}`}>
-            <div className="flex items-start gap-3 sm:gap-4">
-              <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[#3a4a46]/60 bg-[#080e1a]"><MissionStatusIcon status={m.status} /></div>
-              <div className="min-w-0 flex-1">
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        {visibleMissions.length === 0 ? (
+          <Card className="p-8 text-center">
+            <p className="text-sm font-semibold text-[var(--ocean-text)]">No missions matching this filter</p>
+            <p className="text-xs text-[var(--ocean-text-muted)] mt-1">Try switching to &apos;All Recorded Missions&apos; or create a new cleanup mission.</p>
+          </Card>
+        ) : (
+          visibleMissions.map(m => (
+            <div
+              key={m.id}
+              onClick={() => navigate(`/cleanup/${m.id}`)}
+              className="p-4 rounded-xl border border-[var(--ocean-border)] bg-[var(--ocean-card)] hover:bg-[var(--ocean-card-hover)] hover:border-cyan-500/40 transition-all cursor-pointer space-y-3"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-[var(--ocean-surface)] border border-[var(--ocean-border)]">
+                    <MissionStatusIcon status={m.status} />
+                  </div>
                   <div>
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-mono text-[var(--ocean-text-muted)]">{m.id}</span>
-                      <Badge variant={m.priority === 'CRITICAL' ? 'red' : m.priority === 'HIGH' ? 'amber' : 'cyan'} size="xs">{m.priority}</Badge>
-                      {m.sourceDetectionId && <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#4cd6fb]"><Link2 className="h-3 w-3" /> {m.sourceDetectionId}</span>}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-cyan-400 font-bold">{m.id}</span>
+                      <h3 className="text-sm font-bold text-[var(--ocean-text)]">{m.title}</h3>
                     </div>
-                    <h3 className="text-sm font-semibold text-[var(--ocean-text)] sm:text-base">{m.title}</h3>
+                    <p className="text-xs text-[var(--ocean-text-dim)] mt-0.5">{m.locationLabel}</p>
                   </div>
-                  <span className={`self-start whitespace-nowrap rounded border px-2 py-0.5 text-[10px] font-mono sm:text-xs ${getCleanupStatusColor(m.status)}`}>{m.status.replace('_', ' ')}</span>
                 </div>
-                <div className="grid grid-cols-1 gap-2 text-xs text-[var(--ocean-text-dim)] sm:grid-cols-2 xl:grid-cols-4">
-                  <span className="flex items-start gap-1.5"><MapPin className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-cyan-400" /> {m.locationLabel}</span>
-                  <span className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-cyan-400" /> {m.assignedTeam ?? 'Unassigned'}</span>
-                  <span className="flex items-center gap-1.5"><Target className="h-3.5 w-3.5 text-cyan-400" /> {m.detectionCount} detections</span>
-                  <span className="flex items-center gap-1.5"><Scale className="h-3.5 w-3.5 text-cyan-400" /> ~{m.estimatedMassKg} kg estimated</span>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <Badge variant={m.priority === 'CRITICAL' ? 'red' : m.priority === 'HIGH' ? 'amber' : 'outline'} size="xs">
+                    {m.priority}
+                  </Badge>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${getCleanupStatusColor(m.status)}`}>
+                    {m.status.replace('_', ' ')}
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-[var(--ocean-text-muted)]" />
                 </div>
-                {m.status !== 'SCHEDULED' && m.status !== 'DRAFT' && (
-                  <div className="mt-4">
-                    <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--ocean-text-muted)]"><span>Progress</span><span>{m.progress}%</span></div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-[var(--ocean-border)]" role="progressbar" aria-label={`${m.title} progress`} aria-valuenow={m.progress} aria-valuemin={0} aria-valuemax={100}>
-                      <div className="h-full rounded-full transition-[width]" style={{ width: `${m.progress}%`, background: m.status === 'COMPLETED' ? '#00ff88' : 'linear-gradient(90deg, #00d4ff, #00ff88)' }} />
-                    </div>
-                  </div>
-                )}
               </div>
-              <ChevronRight className="mt-2 h-4 w-4 flex-shrink-0 text-[var(--ocean-text-muted)]" />
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-[var(--ocean-border)]/50 text-xs text-[var(--ocean-text-dim)]">
+                <div className="flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{m.detectionCount} contacts</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Scale className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>~{m.estimatedMassKg} kg est.</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{m.assignedTeam || 'Unassigned'}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Clock3 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{m.progress}% progress</span>
+                </div>
+              </div>
             </div>
-          </button>
-        ))}
+          ))
+        )}
       </div>
 
-      <Modal isOpen={showNew} onClose={closeMissionForm} title={source ? 'Review Cleanup Mission' : 'Create Cleanup Mission'} subtitle={source ? 'Confirm assignment and timing before dispatch.' : 'Define a new cleanup response mission.'} size="lg" footer={<><Button variant="ghost" size="sm" onClick={closeMissionForm}>Cancel</Button><Button variant="primary" size="sm" onClick={createMission}>Create Mission</Button></>}>
+      {/* New Mission Modal */}
+      <Modal
+        isOpen={showNew}
+        onClose={closeMissionForm}
+        title={sourceDet ? `Dispatch Cleanup: ${sourceDet.id}` : sourceHs ? `Dispatch Cleanup: ${sourceHs.name}` : 'Create Cleanup Mission'}
+        size="lg"
+      >
         <div className="space-y-4">
-          {source && (
-            <div className="rounded-lg border border-[#4cd6fb]/30 bg-[#4cd6fb]/10 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[#b3ebff]"><Link2 className="h-4 w-4" /> Source detection {source.id}</div>
-              <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-[var(--ocean-text-dim)] sm:grid-cols-3"><span>{source.className}</span><span>{source.riskLevel} risk</span><span>~{source.estimatedMassKg} kg</span></div>
+          {(sourceDet || sourceHs) && (
+            <div className="p-3 rounded-lg border border-cyan-500/30 bg-cyan-950/20 text-xs text-cyan-300 flex items-start gap-2">
+              <Link2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Linked Operational Source:</strong>
+                {sourceDet && <p className="mt-0.5 font-mono">{sourceDet.id} · {sourceDet.className} ({sourceDet.estimatedMassKg} kg) in {sourceDet.locationLabel}</p>}
+                {sourceHs && <p className="mt-0.5 font-mono">{sourceHs.id} · {sourceHs.name} ({sourceHs.mass} kg, {sourceHs.detections} debris contacts)</p>}
+              </div>
             </div>
           )}
-          {formError && <div role="alert" className="rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">{formError}</div>}
+
           <div>
-            <label htmlFor="mission-title" className="block text-xs text-[var(--ocean-text-dim)] mb-1.5">Mission Title</label>
-            <input id="mission-title" value={newTitle} onChange={event => setNewTitle(event.target.value)} className="w-full rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] px-3 py-2 text-sm text-[var(--ocean-text)] outline-none focus:border-cyan-500" placeholder="e.g. Zone 4 Emergency Cleanup" autoFocus />
+            <label className="block text-xs font-semibold text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
+              Mission Title
+            </label>
+            <input
+              type="text"
+              value={newTitle}
+              onChange={e => setNewTitle(e.target.value)}
+              placeholder="e.g. Gulf of Kachchh Ghost Net Recovery"
+              className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-surface)] text-[var(--ocean-text)] outline-none focus:border-cyan-500"
+            />
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div><label htmlFor="mission-priority" className="block text-xs text-[var(--ocean-text-dim)] mb-1.5">Priority</label><select id="mission-priority" value={priority} onChange={event => setPriority(event.target.value as CleanupPriority)} className="w-full rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] px-3 py-2 text-sm text-[var(--ocean-text)] outline-none focus:border-cyan-500"><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
-            <div><label htmlFor="mission-team" className="block text-xs text-[var(--ocean-text-dim)] mb-1.5">Assign Team</label><select id="mission-team" value={team} onChange={event => setTeam(event.target.value)} className="w-full rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] px-3 py-2 text-sm text-[var(--ocean-text)] outline-none focus:border-cyan-500"><option>Coastal Team A</option><option>Coastal Team B</option><option>Marine Ops Beta</option><option>Ops Team Gamma</option></select></div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
+                Priority Level
+              </label>
+              <select
+                value={priority}
+                onChange={e => setPriority(e.target.value as CleanupPriority)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-surface)] text-[var(--ocean-text)] outline-none focus:border-cyan-500"
+              >
+                <option value="CRITICAL">Critical Priority</option>
+                <option value="HIGH">High Priority</option>
+                <option value="MEDIUM">Medium Priority</option>
+                <option value="LOW">Low Priority</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
+                Assigned Team
+              </label>
+              <select
+                value={team}
+                onChange={e => setTeam(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-surface)] text-[var(--ocean-text)] outline-none focus:border-cyan-500"
+              >
+                <option value="Coastal Team A">Coastal Team A (Rapid Recovery)</option>
+                <option value="Marine Ops Beta">Marine Ops Beta (Offshore Vessel)</option>
+                <option value="Coastal Team B">Coastal Team B (Inshore Sweep)</option>
+                <option value="Ops Team Gamma">Ops Team Gamma (Port Intercept)</option>
+              </select>
+            </div>
           </div>
+
           <div>
-            <label htmlFor="mission-schedule" className="block text-xs text-[var(--ocean-text-dim)] mb-1.5">Target departure</label>
-            <div className="relative"><Clock3 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ocean-text-muted)]" /><input id="mission-schedule" type="datetime-local" value={scheduledAt} onChange={event => setScheduledAt(event.target.value)} className="w-full rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] py-2 pl-9 pr-3 text-sm text-[var(--ocean-text)] outline-none focus:border-cyan-500" /></div>
+            <label className="block text-xs font-semibold text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
+              Schedule Execution
+            </label>
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={e => setScheduledAt(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-surface)] text-[var(--ocean-text)] outline-none focus:border-cyan-500"
+            />
           </div>
-          <div><label htmlFor="mission-description" className="block text-xs text-[var(--ocean-text-dim)] mb-1.5">Mission brief</label><textarea id="mission-description" rows={3} value={description} onChange={event => setDescription(event.target.value)} className="w-full resize-none rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] px-3 py-2 text-sm text-[var(--ocean-text)] outline-none focus:border-cyan-500" placeholder="Describe the mission scope and objectives..." /></div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
+              Operational Instructions
+            </label>
+            <textarea
+              rows={3}
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Detail vessel dispatch requirements, recovery nets, containment bins, or environmental cautions..."
+              className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-surface)] text-[var(--ocean-text)] outline-none focus:border-cyan-500 resize-none"
+            />
+          </div>
+
+          {formError && (
+            <div className="p-2.5 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+              {formError}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-[var(--ocean-border)]">
+            <Button variant="ghost" size="sm" onClick={closeMissionForm}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" loading={creating} onClick={createMission}>
+              Dispatch Mission
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

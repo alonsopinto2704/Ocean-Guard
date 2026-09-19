@@ -1,29 +1,33 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Navbar } from './Navbar';
 import { SkipLink } from '../ui/SkipLink';
 
+// Page title/subtitle shown in the Navbar, keyed by route (prefix-matched below).
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   '/portal':     { title: 'Public 3D Portal',     subtitle: 'Interactive 3D marine debris visualization' },
   '/command':    { title: 'Command Center',        subtitle: 'Real-time operations overview' },
-  '/monitoring': { title: 'Live Monitoring',       subtitle: 'Active camera feeds & AI detection' },
+  '/monitoring': { title: '3D Monitoring',       subtitle: 'Interactive sample coastal mission' },
   '/detections': { title: 'Debris Detections',    subtitle: 'All detected marine debris events' },
   '/hotspots':   { title: 'Pollution Hotspots',   subtitle: 'Pollution concentration analysis' },
   '/ai':         { title: 'Environmental AI',     subtitle: 'AI analytics & environmental intelligence' },
   '/cleanup':    { title: 'Cleanup Missions',     subtitle: 'Response planning & field dispatch' },
-  '/data':       { title: 'Data & UAV Ingestion', subtitle: 'Upload footage and trigger AI processing' },
+  '/data':       { title: 'Espada AI & Data',    subtitle: 'Model status, image analysis & reviewed learning' },
   '/sensors':    { title: 'Sensors & Fleet',      subtitle: 'Device status & sensor network' },
-  '/ai-models':  { title: 'AI Model Registry',    subtitle: 'Model versions, metrics & deployment' },
   '/reports':    { title: 'Reports & Export',     subtitle: 'Generate and download mission reports' },
   '/admin':      { title: 'Admin Governance',     subtitle: 'Users, roles & system configuration' },
   '/settings':   { title: 'System Settings',      subtitle: 'Platform configuration & preferences' },
 };
 
+/** Authenticated app shell: sidebar + navbar + scrollable <main> outlet.
+ *  Closes the mobile drawer, scrolls to top, and moves focus to <main> on
+ *  every route change (accessibility), with Escape closing the mobile nav. */
 export function AppLayout() {
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+  // Exact route match first, then prefix match for child routes (e.g. /detections/:id).
   const meta = PAGE_META[location.pathname] ?? PAGE_META[
     Object.keys(PAGE_META).find(k => location.pathname.startsWith(k)) ?? '/command'
   ] ?? { title: 'OceanGuard AI', subtitle: '' };
@@ -59,6 +63,7 @@ export function AppLayout() {
         <Navbar
           title={meta.title}
           subtitle={meta.subtitle}
+          sampleMission={location.pathname === '/monitoring'}
           navigationOpen={mobileNavOpen}
           onOpenNavigation={() => setMobileNavOpen(true)}
         />

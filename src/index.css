@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "tailwindcss" source(".");
 
 /* ─── Ocean Guard Tactical Cyber-Ocean Defense Theme ─── */
 :root {

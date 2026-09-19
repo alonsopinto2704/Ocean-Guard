@@ -91,6 +91,14 @@ vercel --prod
 The mock dashboard data is currently process-local and is demonstration-only.
 Replace it with a managed database before treating operator changes as durable.
 
+On Vercel, the demo JSON store uses the writable temporary directory. It is
+instance-local and can be reset during scaling or redeployment, including login
+sessions. For local testing, `OCEANGUARD_WEB_DATA_DIR` selects an isolated store.
+Local operator data and credentials are excluded from Git and deployment uploads.
+Self-service password recovery returns an explicit unavailable response until a
+verified recovery delivery channel is configured; reset tokens are never returned
+by the public recovery endpoint.
+
 ## Other cloud notes
 
 Use a container host that supports Docker Compose or deploy the three services separately on a private network. A static-only host such as a basic Netlify/Vercel static deployment cannot run the persistent Python inference and continual-learning services by itself.

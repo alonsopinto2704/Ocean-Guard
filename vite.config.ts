@@ -5,14 +5,29 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: { entries: ['src/main.tsx'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-three': ['three'],
+          'vendor-leaflet': ['leaflet'],
+          'vendor-charts': ['recharts'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-framework': ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
   server: {
     hmr: process.env.DISABLE_HMR !== 'true',
-    watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    watch: process.env.DISABLE_HMR === 'true' ? null : { ignored: ['**/.venv/**', '**/datasets/**', '**/training_runs/**', '**/ai_service/data/**'] },
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

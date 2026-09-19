@@ -4,11 +4,15 @@ __pycache__/
 *.py[cod]
 build/
 dist/
+data/
+.vercel/
 coverage/
 datasets/
 training_runs/
 ai_service/data/
 ai_service/models/*.onnx
+ai_service/models/releases/
+ai_service/models/current.json
 ai_service/models/.candidate-*/
 .DS_Store
 *.log

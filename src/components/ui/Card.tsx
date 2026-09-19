@@ -1,15 +1,17 @@
-import React from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 import { Minus, TrendingDown, TrendingUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
-  children: React.ReactNode;
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  children: ReactNode;
   className?: string;
   hover?: boolean;
   onClick?: () => void;
   noPad?: boolean;
 }
 
+/** Surface container. When clickable, becomes a keyboard-accessible button
+ *  (Enter/Space activate) with hover styling. */
 export function Card({ children, className, hover, onClick, noPad, onKeyDown, role, tabIndex, ...props }: CardProps) {
   return (
     <div
@@ -41,11 +43,12 @@ export function Card({ children, className, hover, onClick, noPad, onKeyDown, ro
 interface CardHeaderProps {
   title: string;
   subtitle?: string;
-  icon?: React.ReactNode;
-  action?: React.ReactNode;
+  icon?: ReactNode;
+  action?: ReactNode;
   className?: string;
 }
 
+/** Standard card header row: icon chip, title, optional subtitle, right-side action. */
 export function CardHeader({ title, subtitle, icon, action, className }: CardHeaderProps) {
   return (
     <div className={cn('flex items-center justify-between mb-4', className)}>
@@ -75,7 +78,7 @@ interface StatCardProps {
   label: string;
   value: string | number;
   subvalue?: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   color?: string;
   trend?: 'up' | 'down' | 'stable';
   trendValue?: string;
@@ -83,6 +86,9 @@ interface StatCardProps {
   className?: string;
 }
 
+/** KPI tile: colored laser accent, big value, optional trend chip and icon.
+ *  NOTE: the mini progress bar at the bottom is a fixed-width decoration (84%),
+ *  not driven by data. */
 export function StatCard({
   label, value, subvalue, icon, color = '#00f5d4',
   trend, trendValue, onClick, className

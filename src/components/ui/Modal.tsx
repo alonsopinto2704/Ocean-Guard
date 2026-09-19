@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from './Button';
@@ -8,12 +8,14 @@ interface ModalProps {
   onClose: () => void;
   title?: string;
   subtitle?: string;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
 }
 
+// Accessible dialog: Escape closes, body scroll locks, focus is trapped to the
+// panel and restored to the trigger on close, with optional size presets.
 const sizeMap = {
   sm: 'max-w-md',
   md: 'max-w-lg',
@@ -28,6 +30,8 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
+  // Focus management + Escape-to-close while open. The closed-state branch keeps
+  // body-scroll restore symmetrical (the old code duplicated the same cleanup).
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();

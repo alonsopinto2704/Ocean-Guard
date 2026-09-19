@@ -1,7 +1,8 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 import { AlertTriangle, Loader2, LockKeyhole, WifiOff } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
+/** Centered spinner + message. `size` controls reserved height (sm/md/lg). */
 export function LoadingState({
   message = 'Loading...',
   className,
@@ -20,6 +21,7 @@ export function LoadingState({
   );
 }
 
+/** Friendly empty-data placeholder with optional icon and call-to-action. */
 export function EmptyState({
   icon,
   title,
@@ -27,10 +29,10 @@ export function EmptyState({
   action,
   className,
 }: {
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   title: string;
   description?: string;
-  action?: React.ReactNode;
+  action?: ReactNode;
   className?: string;
 }) {
   return (
@@ -51,6 +53,7 @@ export function EmptyState({
   );
 }
 
+/** Red error panel with an optional retry button. */
 export function ErrorState({
   message = 'Something went wrong',
   onRetry,
@@ -81,6 +84,7 @@ export function ErrorState({
   );
 }
 
+/** Amber banner-style state shown when the SSE connection is lost. */
 export function OfflineState({ className }: { className?: string }) {
   return (
     <div className={cn('flex flex-col items-center justify-center py-16 gap-4 text-center', className)}>
@@ -97,6 +101,7 @@ export function OfflineState({ className }: { className?: string }) {
   );
 }
 
+/** Shown when the user's role lacks access to a section. */
 export function PermissionDenied({ className }: { className?: string }) {
   return (
     <div className={cn('flex flex-col items-center justify-center py-16 gap-4 text-center', className)}>

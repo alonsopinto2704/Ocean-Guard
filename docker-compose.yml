@@ -36,7 +36,7 @@ services:
       dockerfile: Dockerfile.trainer
     environment:
       OCEANGUARD_DATA_DIR: /data
-      OCEANGUARD_BASE_DATASET: /training-data/marine_debris
+      OCEANGUARD_BASE_DATASET: /training-data/taco
       OCEANGUARD_MODEL_DIR: /models
       OCEANGUARD_MIN_NEW_REVIEWS: 50
       OCEANGUARD_RETRAIN_POLL_SECONDS: 300

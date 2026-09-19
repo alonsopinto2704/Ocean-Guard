@@ -1,4 +1,4 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 
 type BadgeVariant =
@@ -7,7 +7,7 @@ type BadgeVariant =
 
 interface BadgeProps {
   variant?: BadgeVariant;
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
   size?: '2xs' | 'xs' | 'sm' | 'md';
 }
@@ -35,6 +35,7 @@ const sizeStyles = {
   md:    'text-sm px-2.5 py-1 font-mono leading-tight',
 };
 
+/** Generic pill/label with variant + size presets. */
 export function Badge({ variant = 'default', children, className, size = 'sm' }: BadgeProps) {
   return (
     <span
@@ -50,7 +51,7 @@ export function Badge({ variant = 'default', children, className, size = 'sm' }:
   );
 }
 
-// Preset badges used in sidebar & headers
+// Preset badges used in sidebar & headers (LIVE pulse, ADMIN tag, counts, 3D).
 export function LiveBadge() {
   return (
     <Badge variant="live" size="xs">
@@ -71,3 +72,5 @@ export function CountBadge({ count }: { count: number | string }) {
 export function ThreeDBadge() {
   return <Badge variant="outline-cyan" size="xs">3D</Badge>;
 }
+
+export { DataProvenanceBadge, type DataProvenanceStatus } from './DataProvenanceBadge';

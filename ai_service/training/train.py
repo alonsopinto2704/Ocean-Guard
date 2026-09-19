@@ -34,6 +34,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--score-threshold", type=float, default=0.35)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or mps")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--architecture", default="SSDLite320 MobileNetV3")
+    parser.add_argument("--input-size", type=int, default=320)
+    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--resume", type=Path)
+    parser.add_argument("--freeze-backbone", action="store_true")
     return parser.parse_args()
 
 
@@ -49,6 +54,8 @@ def resolve_device(requested: str) -> torch.device:
 
 def train_epoch(model, loader, optimizer, device: torch.device) -> float:
     model.train()
+    if not any(p.requires_grad for p in model.backbone.parameters()):
+        model.backbone.eval()
     running_loss = 0.0
     for images, targets in loader:
         images = [image.to(device) for image in images]
@@ -96,6 +103,7 @@ def main() -> None:
     args = parse_args()
     random.seed(args.seed)
     torch.manual_seed(args.seed)
+    torch.set_num_threads(args.threads)
     device = resolve_device(args.device)
     classes = load_classes(args.classes)
     train_dataset = YoloBoxDataset(args.dataset, "train", args.classes, training=True)
@@ -115,7 +123,15 @@ def main() -> None:
         collate_fn=collate_detection_batch,
     )
 
-    model = build_detector(len(classes), pretrained=True).to(device)
+    model = build_detector(len(classes), pretrained=not bool(args.resume), architecture=args.architecture, input_size=args.input_size).to(device)
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location=device, weights_only=True)
+        if checkpoint['classes'] != classes:
+            raise ValueError('Resume checkpoint class schema differs from dataset.')
+        model.load_state_dict(checkpoint['model_state_dict'])
+    if args.freeze_backbone:
+        for parameter in model.backbone.parameters():
+            parameter.requires_grad = False
     optimizer = torch.optim.SGD(
         [parameter for parameter in model.parameters() if parameter.requires_grad],
         lr=args.learning_rate,
@@ -130,7 +146,7 @@ def main() -> None:
         loss = train_epoch(model, train_loader, optimizer, device)
         metrics = evaluate(model, val_loader, device, args.score_threshold)
         scheduler.step()
-        print(json.dumps({"epoch": epoch, "trainLoss": round(loss, 5), **metrics}))
+        print(json.dumps({"epoch": epoch, "trainLoss": round(loss, 5), **metrics}), flush=True)
 
         checkpoint = {
             "epoch": epoch,
@@ -138,7 +154,12 @@ def main() -> None:
             "optimizer_state_dict": optimizer.state_dict(),
             "classes": classes,
             "metrics": metrics,
-            "architecture": "Faster R-CNN MobileNetV3 FPN",
+            "architecture": args.architecture,
+            "inputSize": args.input_size,
+            "scoreThreshold": args.score_threshold,
+            "dataset": str(args.dataset),
+            "trainingImages": len(train_dataset),
+            "validationImages": len(val_dataset),
         }
         torch.save(checkpoint, args.output / "last.pt")
         if metrics["iou50F1"] > best_f1:

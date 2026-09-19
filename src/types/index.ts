@@ -211,7 +211,9 @@ export interface CleanupEvidence {
   description: string;
   uploadedAt: string;
   uploadedBy: string;
-  collectedMassKg?: number;
+  /** Mass logged for this evidence entry. Kept in sync with the server's
+   *  StoredCleanupEvidence.recoveredKg (previously mismatched as collectedMassKg). */
+  recoveredKg?: number;
 }
 
 // ─── Hotspots ────────────────────────────────────────────────────────────────
@@ -293,10 +295,12 @@ export interface AIInferenceResult {
 
 export interface AILearningStatus {
   analysesStored: number;
+  framesReviewed?: number;
   detectionsReviewed: number;
   approvedTrainingExamples: number;
   falsePositivesReviewed: number;
   learningMode: string;
+  trainer?: { state: string; lastHeartbeat?: string; reviewThreshold?: number; lastError?: string; lastRun?: { promoted: boolean; candidateF1: number; baselineF1: number } };
 }
 
 export interface AIServiceStatus {
@@ -321,9 +325,13 @@ export interface AIServiceStatus {
   learning: AILearningStatus | null;
   error: string | null;
   notice?: string | null;
+  trainedAt?: string;
+  trainingImages?: number;
+  validationImages?: number;
+  validationScope?: string;
 }
 
-export type AIFeedbackVerdict = 'CONFIRMED' | 'FALSE_POSITIVE' | 'CORRECTED';
+export type AIFeedbackVerdict = 'CONFIRMED' | 'FALSE_POSITIVE' | 'CORRECTED' | 'MISSED';
 
 export interface AIFeedbackPayload {
   analysisId: string;
@@ -334,47 +342,32 @@ export interface AIFeedbackPayload {
   reviewer?: string;
 }
 
-// ─── Media & Processing ─────────────────────────────────────────────────────
-export type MediaType = 'IMAGE' | 'VIDEO' | 'DRONE_FOOTAGE' | 'CAMERA_FEED';
-export type JobStatus = 'QUEUED' | 'UPLOADING' | 'VALIDATING' | 'EXTRACTING_FRAMES' | 'DETECTING' | 'CLASSIFYING' | 'TRACKING' | 'CALCULATING_RISK' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-
-export interface MediaFile {
-  id: string;
-  name: string;
-  type: MediaType;
-  sizeBytes: number;
-  duration?: number;
-  uploadedAt: string;
-  uploadedBy: string;
-  status: JobStatus;
-  progress: number; // 0-100
-  detectionCount?: number;
-  jobId?: string;
-  url?: string;
-  thumbnailUrl?: string;
+export interface AIFrameReviewAnnotation {
+  annotationId: string;
+  sourceDetectionId: string | null;
+  verdict: AIFeedbackVerdict;
+  correctedClass?: string;
+  correctedBoundingBox?: AIBoundingBox;
 }
 
-export interface ProcessingJob {
-  id: string;
-  mediaId: string;
-  status: JobStatus;
-  progress: number;
-  stages: JobStage[];
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
-  detectionCount?: number;
-  framesProcessed?: number;
-  totalFrames?: number;
+export interface AIFrameReviewPayload {
+  expectedRevision: number;
+  annotations: AIFrameReviewAnnotation[];
+  reviewer?: string;
 }
 
-export interface JobStage {
-  name: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-  progress: number;
-  startedAt?: string;
-  completedAt?: string;
+export interface AIFrameReviewResponse {
+  analysisId: string;
+  reviewId: number;
+  revision: number;
+  contentHash: string;
+  annotationCount: number;
+  queuedForLearning: boolean;
+  idempotent: boolean;
+  updatedAt: string;
 }
+
+
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 export interface DashboardSummary {
@@ -386,20 +379,6 @@ export interface DashboardSummary {
   camerasOnline: string;
   systemStatus: SystemStatus;
   aiStatus: AIStatus;
-}
-
-// ─── Monitoring Zone ────────────────────────────────────────────────────────
-export interface MonitoringZone {
-  id: string;
-  name: string;
-  description: string;
-  lat: number;
-  lng: number;
-  radius: number;
-  color: string;
-  isActive: boolean;
-  alertThresholdRisk: number;
-  cameraCount: number;
 }
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
@@ -430,19 +409,4 @@ export interface SSEEvent {
   type: SSEEventType;
   payload: any;
   timestamp: string;
-}
-
-// ─── API Responses ───────────────────────────────────────────────────────────
-export interface ApiResponse<T> {
-  data?: T;
-  error?: string;
-  message?: string;
-}
-
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-  hasMore: boolean;
 }

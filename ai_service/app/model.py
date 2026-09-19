@@ -4,6 +4,7 @@ import io
 import json
 import os
 import time
+from threading import RLock
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ class ModelNotReadyError(RuntimeError):
 
 class MarineDebrisDetector:
     def __init__(self) -> None:
+        self._lock = RLock()
         default_model_dir = Path(__file__).resolve().parents[1] / "models"
         model_path = Path(
             os.getenv("OCEANGUARD_MODEL_PATH", str(default_model_dir / "espada-v1.onnx"))
@@ -39,6 +41,7 @@ class MarineDebrisDetector:
         )
 
         self.model_path = model_path
+        self.model_root = model_path.parent
         self.classes_path = classes_path
         self.metadata_path = metadata_path
         self.input_size = int(os.getenv("OCEANGUARD_INPUT_SIZE", "640"))
@@ -54,8 +57,6 @@ class MarineDebrisDetector:
         self._load_model()
 
     def _load_model(self) -> None:
-        self.session = None
-        self.input_name = None
         self.load_error = None
         if not self.model_path.exists():
             self.load_error = "No trained ONNX weights were found. Train and export the detector first."
@@ -70,21 +71,53 @@ class MarineDebrisDetector:
                 for provider in ("CUDAExecutionProvider", "CoreMLExecutionProvider", "CPUExecutionProvider")
                 if provider in available
             ]
-            self.session = ort.InferenceSession(str(self.model_path), providers=providers)
-            self.input_name = self.session.get_inputs()[0].name
-            self.model_mtime = self.model_path.stat().st_mtime
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = min(4, os.cpu_count() or 1)
+            session = ort.InferenceSession(str(self.model_path), sess_options=options, providers=providers)
+            input_info = session.get_inputs()[0]
+            if len(input_info.shape) != 4 or input_info.shape[1] != 3:
+                raise ValueError('Expected one NCHW RGB image tensor.')
+            if [o.name for o in session.get_outputs()] != ['boxes', 'scores', 'labels']:
+                raise ValueError('Expected boxes, scores and labels outputs.')
+            metadata = self._read_json(self.metadata_path, default={})
+            classes = self._read_json(self.classes_path, default=[])
+            if not classes or not all(isinstance(c, str) for c in classes):
+                raise ValueError('Model classes are missing or invalid.')
+            input_size = int(input_info.shape[2]) if isinstance(input_info.shape[2], int) else int(metadata.get('inputSize', 640))
+            threshold = float(os.getenv('OCEANGUARD_CONFIDENCE_THRESHOLD', str(metadata.get('confidenceThreshold', .35))))
+            if input_info.shape[2] != input_info.shape[3] or not 32 <= input_size <= 2048:
+                raise ValueError('Expected a square input between 32 and 2048 pixels.')
+            if not 0 < threshold <= 1:
+                raise ValueError('Confidence threshold must be in (0, 1].')
+            bins = self._load_calibration(metadata)
+            mtime = self.model_path.stat().st_mtime
+            # Only commit after every part of the candidate is valid.
+            self.session, self.input_name = session, input_info.name
+            self.input_size, self.threshold = input_size, threshold
+            self.metadata, self.classes = metadata, classes
+            self.calibration_bins, self.model_mtime = bins, mtime
         except Exception as exc:  # Service must still start and report diagnostics.
             self.load_error = f"Unable to load ONNX model: {exc}"
+            if self.model_path.exists():
+                self.model_mtime = self.model_path.stat().st_mtime
 
     def _refresh_if_promoted(self) -> None:
+        pointer = self._read_json(self.model_root / 'current.json', {})
+        if pointer.get('release'):
+            release = (self.model_root / pointer['release']).resolve()
+            if not release.is_relative_to(self.model_root.resolve()):
+                self.load_error = 'Invalid model release path.'
+                return
+            if release / 'espada-v1.onnx' != self.model_path:
+                self.model_path = release / 'espada-v1.onnx'
+                self.classes_path = release / 'classes.json'
+                self.metadata_path = release / 'model-metadata.json'
+                self.model_mtime = None
         if not self.model_path.exists():
             return
         current_mtime = self.model_path.stat().st_mtime
         if self.model_mtime == current_mtime:
             return
-        self.classes = self._read_json(self.classes_path, default=self.classes)
-        self.metadata = self._read_json(self.metadata_path, default=self.metadata)
-        self.calibration_bins = self._load_calibration(self.metadata)
         self._load_model()
 
     @staticmethod
@@ -119,6 +152,10 @@ class MarineDebrisDetector:
         return bool(self.classes) and (learned_ready or self.bootstrap_enabled)
 
     def status(self) -> dict:
+        with self._lock:
+            return self._status_locked()
+
+    def _status_locked(self) -> dict:
         self._refresh_if_promoted()
         learned_ready = self.session is not None and self.input_name is not None
         state = (
@@ -151,22 +188,33 @@ class MarineDebrisDetector:
                 else "visual_anomaly_score"
             ),
             "metrics": self.metadata.get("metrics"),
+            "trainedAt": self.metadata.get('trainedAt'),
+            "trainingImages": self.metadata.get('trainingImages'),
+            "validationImages": self.metadata.get('validationImages'),
+            "validationScope": self.metadata.get('validationScope'),
             "error": self.load_error if not self.ready else None,
-            "notice": self.load_error if self.ready and not learned_ready else None,
+            "notice": self.load_error or self.metadata.get('validationScope'),
         }
 
     def predict(self, image_bytes: bytes, filename: str) -> dict:
+        with self._lock:
+            return self._predict_locked(image_bytes, filename)
+
+    def _predict_locked(self, image_bytes: bytes, filename: str) -> dict:
         self._refresh_if_promoted()
         if not self.ready:
             raise ModelNotReadyError(self.load_error or "The detector is not ready.")
 
         try:
             import numpy as np
-            from PIL import Image
+            from PIL import Image, ImageOps
         except ImportError as exc:
             raise ModelNotReadyError(f"AI runtime dependency missing: {exc}") from exc
 
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image = Image.open(io.BytesIO(image_bytes))
+        if image.width * image.height > 25_000_000:
+            raise ValueError('Image exceeds the 25 megapixel limit. Resize it before uploading.')
+        image = ImageOps.exif_transpose(image).convert("RGB")
         if self.session is None or self.input_name is None:
             return self._predict_bootstrap(image, filename)
 
@@ -186,7 +234,7 @@ class MarineDebrisDetector:
 
         for index, raw_score in enumerate(scores):
             raw_confidence = float(raw_score)
-            if raw_confidence < self.threshold:
+            if not np.isfinite(raw_confidence) or raw_confidence < self.threshold or not np.all(np.isfinite(boxes[index])):
                 continue
 
             class_index = int(labels[index]) - 1  # TorchVision reserves 0 for background.
@@ -196,6 +244,8 @@ class MarineDebrisDetector:
             class_name = self.classes[class_index]
             calibrated = calibrate_confidence(raw_confidence, self.calibration_bins)
             bbox = normalized_box(boxes[index], self.input_size, self.input_size)
+            if bbox['width'] <= 0 or bbox['height'] <= 0:
+                continue
             score = risk_score(class_name, calibrated, bbox)
             detections.append(
                 {
@@ -204,7 +254,7 @@ class MarineDebrisDetector:
                     "parentCategory": category_for(class_name),
                     "confidence": round(calibrated * 100, 2),
                     "rawConfidence": round(raw_confidence * 100, 2),
-                    "confidenceCalibrated": bool(self.calibration_bins),
+                    "confidenceCalibrated": any(b.lower <= raw_confidence <= b.upper for b in self.calibration_bins),
                     "boundingBox": bbox,
                     "riskScore": score,
                     "riskLevel": risk_level(score),

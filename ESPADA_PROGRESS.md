@@ -1,5 +1,13 @@
 # Espada v1 continuation checkpoint
 
+> **Latest 2026-09-14:** Backend hardening, fail-closed continual worker snapshotting, optimistic concurrency race testing, and legacy endpoint 410 retirement complete. 24 Python unit tests pass (in 3.98s); 3 dev launcher tests pass; TypeScript and production Vite + esbuild bundles pass without errors. Active pilot: SSDLite320 MobileNetV3 (single class: `Mixed Waste`), self-hosted, 100% owned weights and pipeline. All four tracking files synchronized. Read `BRAIN.md` → Latest checkpoint — 2026-09-14.
+
+> **Latest 2026-09-13:** PAUSED. Read BRAIN.md → Latest checkpoint — 2026-09-13 and IMPLEMENTATION_PLAN.md first; they supersede all notes below. Delegation rules saved in AGENTS.md; monitoring/camera/trainer/launcher improvements saved. TypeScript and both builds passed; 15 Python and 3 launcher tests reported passing. Active low-recall pilot unchanged. Preview services stopped. Remaining tasks and validation gaps are recorded in BRAIN.md.
+
+> **Latest 2026-09-12 checkpoint:** Read `BRAIN.md` → Resume handoff first. Work resumed, a verified limited ONNX litter pilot was activated, and progress was saved again at the usage cutoff (8% remaining on the last check). Monitoring surface rendering, TypeScript, Vite build, and 10 Python tests passed. Further work is paused; do not resume automatically. This supersedes the older notes below.
+
+> **2026-09-12 update:** Work is paused at the user's explicit request. Read `IMPLEMENTATION_PLAN.md` first; its PAUSED checkpoint supersedes this older document. New monitoring code and ML runtime/training changes are saved but not fully verified. Refinement checkpoints are in `training_runs/espada-refined/`, stopped after epoch 5. No new ONNX model was exported or promoted. Local training and preview processes were stopped. Do not resume automatically.
+
 Saved: 2026-09-09 (Asia/Calcutta)
 
 ## User requirements captured

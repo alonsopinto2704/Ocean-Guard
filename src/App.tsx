@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
@@ -17,22 +17,25 @@ const Cleanup        = lazy(() => import('./pages/Cleanup'));
 const CleanupDetail  = lazy(() => import('./pages/CleanupDetail'));
 const DataIngestion  = lazy(() => import('./pages/DataIngestion'));
 const Sensors        = lazy(() => import('./pages/Sensors'));
-const AIModels       = lazy(() => import('./pages/AIModels'));
 const Reports        = lazy(() => import('./pages/Reports'));
 const Admin          = lazy(() => import('./pages/Admin'));
 const Settings       = lazy(() => import('./pages/Settings'));
 
+// Fallback shown while a lazy page chunk is loading.
 const PageLoader = () => (
   <div className="flex h-full items-center justify-center">
     <LoadingState message="Loading sector..." size="md" />
   </div>
 );
 
+// Sends "/" to /command when signed in, /login otherwise.
 function RootRedirect() {
   const { isAuthenticated } = useAuth();
   return <Navigate to={isAuthenticated ? '/command' : '/login'} replace />;
 }
 
+/** Route table: public routes, legacy redirects (/sonar-3d, /ai-models), and the
+ *  protected layout nest with a role-gated /admin. */
 export default function App() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -55,7 +58,7 @@ export default function App() {
           <Route path="/cleanup/:id" element={<CleanupDetail />} />
           <Route path="/data"       element={<DataIngestion />} />
           <Route path="/sensors"    element={<Sensors />} />
-          <Route path="/ai-models"  element={<AIModels />} />
+          <Route path="/ai-models"  element={<Navigate to="/data" replace />} />
           <Route path="/reports"    element={<Reports />} />
           <Route path="/admin"      element={
             <ProtectedRoute allowedRoles={['ADMIN']}>

@@ -1,10 +1,10 @@
-import React from 'react';
 import type { AIInferenceResult } from '../../types';
 
 interface DetectionOverlayProps {
   result: AIInferenceResult | null;
 }
 
+// Bounding-box stroke color per risk tier, drawn over analyzed imagery.
 const RISK_COLOR: Record<string, string> = {
   LOW: '#4cd6fb',
   MEDIUM: '#ffaa00',
@@ -12,6 +12,8 @@ const RISK_COLOR: Record<string, string> = {
   CRITICAL: '#ff5964',
 };
 
+/** Renders normalized bounding boxes + labels for every Espada detection.
+ *  Positioned absolutely over the image at the same aspect ratio. */
 export function DetectionOverlay({ result }: DetectionOverlayProps) {
   if (!result) return null;
 
@@ -45,6 +47,8 @@ export function DetectionOverlay({ result }: DetectionOverlayProps) {
   );
 }
 
+/** Labeled progress bar for a confidence value; wording changes when the score
+ *  is calibrated vs. raw or anomaly-based. */
 export function ConfidenceMeter({ value, calibrated, method }: { value: number; calibrated: boolean; method?: string }) {
   const color = value >= 80 ? '#00f5d4' : value >= 55 ? '#ffaa00' : '#ff8c42';
   const label = calibrated

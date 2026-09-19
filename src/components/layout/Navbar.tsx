@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Bell, Menu, Radio } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -8,11 +7,12 @@ import { Button } from '../ui/Button';
 interface NavbarProps {
   title?: string;
   subtitle?: string;
+  sampleMission?: boolean;
   navigationOpen?: boolean;
   onOpenNavigation?: () => void;
 }
 
-export function Navbar({ title, subtitle, navigationOpen = false, onOpenNavigation }: NavbarProps) {
+export function Navbar({ title, subtitle, sampleMission = false, navigationOpen = false, onOpenNavigation }: NavbarProps) {
   const { user, logout } = useAuth();
   const { health, isOnline, summary } = useSystem();
   const navigate = useNavigate();
@@ -52,7 +52,7 @@ export function Navbar({ title, subtitle, navigationOpen = false, onOpenNavigati
       </div>
 
       {/* Center Tactical Telemetry (hidden on smaller screens) */}
-      <div className="hidden 2xl:flex items-center gap-4 px-3 py-1.5 rounded bg-[#161c28]/80 border border-[#3a4a46]/40">
+      {!sampleMission && <div className="hidden 2xl:flex items-center gap-4 px-3 py-1.5 rounded bg-[#161c28]/80 border border-[#3a4a46]/40">
         <div className="flex flex-col text-left">
           <span className="font-telemetry-tag text-[9px] uppercase tracking-wider text-[#b9cac4]">
             Neural Confidence
@@ -64,28 +64,28 @@ export function Navbar({ title, subtitle, navigationOpen = false, onOpenNavigati
         <div className="h-6 w-px bg-[#3a4a46]/50" />
         <div className="flex flex-col text-left">
           <span className="font-telemetry-tag text-[9px] uppercase tracking-wider text-[#b9cac4]">
-            Bathymetric Swath
+            Surveillance Fleet
           </span>
           <span className="font-data-mono-sm text-[11px] font-bold text-[#4cd6fb]">
-            1.4M SQ KM MONITORED
+            {summary?.camerasOnline ? `${summary.camerasOnline} CAMERAS ONLINE` : '7 COASTAL SECTORS'}
           </span>
         </div>
         <div className="h-6 w-px bg-[#3a4a46]/50" />
         <div className="flex flex-col text-left">
           <span className="font-telemetry-tag text-[9px] uppercase tracking-wider text-[#b9cac4]">
-            Latency // FPS
+            Inference Engine
           </span>
           <span className="font-data-mono-sm text-[11px] font-bold text-[#dde2f3]">
-            {health?.aiLatencyMs?.toFixed(1) ?? '14.2'}MS · {health?.fps?.toFixed(1) ?? '29.8'}
+            {health?.aiLatencyMs ? `${health.aiLatencyMs.toFixed(0)}MS` : health?.ai === 'RUNNING' ? 'ACTIVE' : 'STANDBY'} · {summary?.systemStatus ?? 'ONLINE'}
           </span>
         </div>
-      </div>
+      </div>}
 
       {/* Right Action Bar */}
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
         {/* Connection status badge */}
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#161c28] border border-[#3a4a46]/60 font-mono text-[11px]">
-          {isOnline ? (
+          {sampleMission ? <span className="text-[#d9d9b5]">SAMPLE SCENE</span> : isOnline ? (
             <>
               <span className="w-1.5 h-1.5 rounded-full bg-[#00f5d4] shadow-[0_0_6px_#00f5d4]" />
               <span className="text-[#00f5d4] font-semibold">ONLINE</span>
@@ -104,7 +104,7 @@ export function Navbar({ title, subtitle, navigationOpen = false, onOpenNavigati
           className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded font-data-mono-sm text-[11px] font-bold uppercase bg-gradient-to-r from-[#00f5d4] to-[#4cd6fb] text-[#00201a] hover:shadow-[0_0_20px_rgba(0,245,212,0.4)] transition-all cursor-pointer"
         >
           <Radio className="w-3.5 h-3.5 animate-pulse" />
-          <span>Live HUD</span>
+          <span>3D view</span>
         </button>
 
         {/* Alerts Bell */}

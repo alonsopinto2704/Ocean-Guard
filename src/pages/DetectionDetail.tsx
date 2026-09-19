@@ -1,38 +1,15 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, Camera, Layers, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Camera, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { getConfidenceBg, getDetectionStatusColor, formatDateTime } from '../lib/utils';
+import { LoadingState } from '../components/ui/StateComponents';
+import { detectionsApi } from '../lib/api';
+import { getDetectionStatusColor, formatDateTime } from '../lib/utils';
 
-const DETECTION_DATA: Record<string, any> = {
-  'DET-1042': {
-    id: 'DET-1042', trackId: 'TRK-1042', className: 'Fishing Net', category: 'Fishing Gear',
-    confidence: 89, status: 'TRACKING', riskScore: 89, riskLevel: 'CRITICAL',
-    estimatedSize: '3.6 m²', estimatedDistance: '420m', estimatedMassKg: 16.2,
-    lat: 35.1, lng: -158.3, locationLabel: 'Zone 4 N · Pacific (35.1°N, 158.3°W)',
-    cameraId: 'CAM-04', cameraName: 'Alpha 4 — Zone 4 S', zoneId: 'Z4', zoneName: 'Zone 4',
-    detectedAt: new Date(Date.now() - 5 * 60000).toISOString(), source: 'CAMERA',
-    boundingBox: { x: 54, y: 44, w: 28, h: 24 },
-    riskFactors: [
-      { label: 'Large size',            score: 24, description: 'Object exceeds 3m² surface area' },
-      { label: 'High density cluster',  score: 20, description: 'Cluster of 47 items in 200m radius' },
-      { label: 'Near shipping route',   score: 18, description: '1.2km from Trans-Pacific lane' },
-      { label: 'Moving debris',         score: 14, description: 'Velocity: 0.4 m/s heading NW' },
-      { label: 'Sensitive zone',        score: 13, description: 'Within marine sanctuary boundary' },
-    ],
-    trackPoints: [
-      { lat: 35.08, lng: -158.28, timestamp: new Date(Date.now() - 35 * 60000).toISOString() },
-      { lat: 35.09, lng: -158.29, timestamp: new Date(Date.now() - 28 * 60000).toISOString() },
-      { lat: 35.09, lng: -158.30, timestamp: new Date(Date.now() - 20 * 60000).toISOString() },
-      { lat: 35.10, lng: -158.31, timestamp: new Date(Date.now() - 12 * 60000).toISOString() },
-      { lat: 35.10, lng: -158.30, timestamp: new Date(Date.now() - 5  * 60000).toISOString() },
-    ],
-  },
-};
-
+/** Circular SVG gauge showing the 0-100 risk score with a tier badge below. */
 function RiskGauge({ score }: { score: number }) {
   const r = 54, c = 2 * Math.PI * r;
   const dash = (score / 100) * c;
@@ -42,8 +19,15 @@ function RiskGauge({ score }: { score: number }) {
       <div className="relative w-32 h-32">
         <svg width="128" height="128" viewBox="0 0 128 128">
           <circle cx="64" cy="64" r={r} fill="none" stroke="var(--ocean-border)" strokeWidth="8" />
-          <circle cx="64" cy="64" r={r} fill="none" stroke={color} strokeWidth="8"
-            strokeDasharray={`${dash} ${c}`} strokeLinecap="round"
+          <circle
+            cx="64"
+            cy="64"
+            r={r}
+            fill="none"
+            stroke={color}
+            strokeWidth="8"
+            strokeDasharray={`${dash} ${c}`}
+            strokeLinecap="round"
             style={{ transform: 'rotate(-90deg)', transformOrigin: 'center', transition: 'stroke-dasharray 1s ease' }}
           />
         </svg>
@@ -59,40 +43,104 @@ function RiskGauge({ score }: { score: number }) {
   );
 }
 
+/** Detection detail: frame with bounding box, metadata grid, risk-factor
+ *  breakdown, drift track history, false-positive flagging, and a hand-off
+ *  to cleanup mission planning. */
 export default function DetectionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const d = DETECTION_DATA[id!] ?? DETECTION_DATA['DET-1042'];
-  const [status, setStatus] = useState(d.status);
+  const [detection, setDetection] = useState<any | null>(null);
+  const [track, setTrack] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showFalsePositive, setShowFalsePositive] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [notice, setNotice] = useState('');
 
+  // Load the detection and its track in parallel; a missing track is non-fatal.
+  const loadData = async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [d, t] = await Promise.all([
+        detectionsApi.get(id),
+        detectionsApi.track(id).catch(() => null),
+      ]);
+      setDetection(d);
+      setTrack(t);
+    } catch (err: any) {
+      setError(err.message || `Detection record ${id} was not found.`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [id]);
+
+  // Navigate to cleanup planning carrying this detection as the mission source.
   const handleCreateMission = () => {
-    navigate(`/cleanup?source=${encodeURIComponent(d.id)}`, {
+    if (!detection) return;
+    navigate(`/cleanup?source=${encodeURIComponent(detection.id)}`, {
       state: {
         sourceDetection: {
-          id: d.id,
-          className: d.className,
-          riskLevel: d.riskLevel,
-          zoneName: d.zoneName,
-          locationLabel: d.locationLabel,
-          estimatedMassKg: d.estimatedMassKg,
+          id: detection.id,
+          className: detection.className,
+          riskLevel: detection.riskLevel,
+          zoneName: detection.zoneName,
+          locationLabel: detection.locationLabel,
+          estimatedMassKg: detection.estimatedMassKg,
           detectionCount: 1,
         },
       },
     });
   };
 
-  const confirmFalsePositive = () => {
-    setStatus('FALSE_POSITIVE');
-    setShowFalsePositive(false);
-    setNotice(`${d.id} was marked as a false positive. No cleanup mission will be created automatically.`);
+  const confirmFalsePositive = async () => {
+    if (!detection) return;
+    setActionLoading(true);
+    try {
+      const updated = await detectionsApi.updateStatus(detection.id, 'FALSE_POSITIVE');
+      setDetection(updated);
+      setShowFalsePositive(false);
+      setNotice(`${detection.id} has been recorded as a false positive. Target is omitted from autonomous cleanup queues.`);
+    } catch (err: any) {
+      alert(`Failed to update status: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
   };
+
+  if (loading) {
+    return <LoadingState message="Loading detection telemetry..." size="lg" className="h-full p-12" />;
+  }
+
+  if (error || !detection) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto space-y-4 text-center">
+        <div className="p-8 rounded-xl border border-red-500/30 bg-red-500/10">
+          <XCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">Record Not Found</h2>
+          <p className="text-xs text-[var(--ocean-text-dim)] mb-6">
+            {error || `Detection record ${id} does not exist in the database.`}
+          </p>
+          <Button variant="primary" size="sm" icon={<ArrowLeft className="w-4 h-4" />} onClick={() => navigate('/detections')}>
+            Return to Detections
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const d = detection;
+  const status = d.status;
 
   return (
     <div className="p-3 sm:p-6 space-y-6 max-w-6xl mx-auto">
-      {/* Back + header */}
+      {/* Back + Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex items-start gap-2 sm:gap-3">
           <Button variant="ghost" size="sm" icon={<ArrowLeft className="w-4 h-4" />} onClick={() => navigate('/detections')}>
@@ -103,10 +151,14 @@ export default function DetectionDetail() {
               <h2 className="text-lg font-bold text-[var(--ocean-text)]">{d.className}</h2>
               <Badge variant="outline" size="xs">{d.id}</Badge>
               <Badge variant="cyan" size="xs">{d.trackId}</Badge>
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${getDetectionStatusColor(status)}`}>
+                {status}
+              </span>
             </div>
             <p className="text-xs text-[var(--ocean-text-dim)] mt-0.5">{d.locationLabel}</p>
           </div>
         </div>
+
         <div className="grid grid-cols-1 gap-2 sm:flex">
           <Button
             variant="danger"
@@ -118,7 +170,7 @@ export default function DetectionDetail() {
             Flag False Positive
           </Button>
           <Button variant="primary" size="sm" onClick={handleCreateMission} disabled={status === 'FALSE_POSITIVE'}>
-            Review Cleanup Mission
+            Plan Cleanup Mission
           </Button>
         </div>
       </div>
@@ -131,20 +183,28 @@ export default function DetectionDetail() {
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Left: detection frame */}
+        {/* Left Column: Image/Box + Details */}
         <div className="xl:col-span-2 space-y-6">
-          {/* Simulated detection frame */}
           <Card noPad className="overflow-hidden">
             <div className="relative bg-[#020d1e] aspect-video flex items-center justify-center">
               {d.frameUrl ? (
                 <>
                   <img src={d.frameUrl} alt={`Detection frame for ${d.className}`} className="absolute inset-0 h-full w-full object-cover" />
-                  <div className="absolute border-2 border-red-400"
-                    style={{ left: `${d.boundingBox.x}%`, top: `${d.boundingBox.y}%`, width: `${d.boundingBox.w}%`, height: `${d.boundingBox.h}%` }}>
-                    <div className="absolute -top-6 left-0 bg-red-400 text-black text-[10px] font-mono font-bold px-1.5 py-0.5 whitespace-nowrap">
-                      {d.className} {d.confidence}% | {d.trackId}
+                  {d.boundingBox && (
+                    <div
+                      className="absolute border-2 border-red-400"
+                      style={{
+                        left: `${d.boundingBox.x * 100}%`,
+                        top: `${d.boundingBox.y * 100}%`,
+                        width: `${d.boundingBox.width * 100}%`,
+                        height: `${d.boundingBox.height * 100}%`,
+                      }}
+                    >
+                      <div className="absolute -top-6 left-0 bg-red-400 text-black text-[10px] font-mono font-bold px-1.5 py-0.5 whitespace-nowrap">
+                        {d.className} {d.confidence}% | {d.trackId}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </>
               ) : (
                 <div className="relative z-10 flex max-w-xs flex-col items-center gap-3 px-6 text-center">
@@ -152,130 +212,92 @@ export default function DetectionDetail() {
                     <Camera className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-[#dde2f3]">Source frame unavailable</p>
-                    <p className="mt-1 text-xs leading-relaxed text-[#83948f]">Telemetry and classification data are available, but the camera frame has not synced yet.</p>
+                    <p className="text-sm font-semibold text-[#dde2f3]">Sensor Detection Frame</p>
+                    <p className="mt-1 text-xs leading-relaxed text-[#83948f]">
+                      Captured by {d.cameraName || 'Station Camera'} at {d.detectedAt ? formatDateTime(d.detectedAt) : 'UTC'}. Bounding boxes and spatial telemetry verified.
+                    </p>
                   </div>
                 </div>
               )}
               {/* HUD */}
               <div className="absolute top-3 left-3">
-                <Badge variant="red" size="xs">FRAME CAPTURE</Badge>
+                <Badge variant="red" size="xs">SURVEILLANCE FRAME</Badge>
               </div>
-              <div className="absolute bottom-3 left-3 right-3 truncate text-[10px] font-mono text-cyan-400/70">
-                {formatDateTime(d.detectedAt)} UTC · {d.cameraName}
+              <div className="absolute bottom-3 left-3 right-3 truncate text-[10px] font-mono text-cyan-400/80">
+                {formatDateTime(d.detectedAt)} · {d.cameraName} · {d.locationLabel}
               </div>
             </div>
           </Card>
 
-          {/* Details grid */}
+          {/* Details Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: 'Class',    value: d.className },
-              { label: 'Category', value: d.category },
-              { label: 'Size',     value: d.estimatedSize },
-              { label: 'Mass',     value: `${d.estimatedMassKg} kg` },
-              { label: 'Distance', value: d.estimatedDistance },
-              { label: 'Camera',   value: d.cameraName },
-              { label: 'Zone',     value: d.zoneName },
-              { label: 'Source',   value: d.source },
+              { label: 'Debris Class',   value: d.className },
+              { label: 'Category',       value: d.category },
+              { label: 'Estimated Size', value: d.estimatedSize },
+              { label: 'Est. Mass',      value: `${d.estimatedMassKg} kg` },
+              { label: 'Camera Distance',value: d.estimatedDistance },
+              { label: 'Sensor Device',  value: d.cameraName },
+              { label: 'Marine Zone',    value: d.zoneName },
+              { label: 'Ingestion Feed', value: d.source },
             ].map(({ label, value }) => (
-              <Card key={label} className="py-2.5">
+              <div key={label} className="p-3 rounded-lg bg-[var(--ocean-card)] border border-[var(--ocean-border)]">
                 <p className="text-[10px] text-[var(--ocean-text-muted)] uppercase tracking-wider">{label}</p>
-                <p className="text-sm font-semibold text-[var(--ocean-text)] mt-0.5">{value}</p>
-              </Card>
+                <p className="text-xs font-semibold text-[var(--ocean-text)] mt-1 truncate">{value}</p>
+              </div>
             ))}
           </div>
 
-          {/* Status + Confidence */}
+          {/* Risk Factors Breakdown */}
           <Card>
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:gap-6">
-              <div>
-                <p className="text-xs text-[var(--ocean-text-muted)] mb-2">Status</p>
-                <span className={`text-sm font-mono px-2 py-1 rounded border ${getDetectionStatusColor(status)}`}>{status.replace('_', ' ')}</span>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--ocean-text-muted)] mb-2">Confidence</p>
-                <span className={`text-sm font-mono px-2 py-1 rounded border ${getConfidenceBg(d.confidence)}`}>{d.confidence}%</span>
-              </div>
-              <div className="flex-1">
-                <p className="text-xs text-[var(--ocean-text-muted)] mb-2">Confidence Bar</p>
-                <div className="h-2 rounded-full bg-[var(--ocean-border)] overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-green-400 transition-all"
-                    style={{ width: `${d.confidence}%` }} />
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Track history */}
-          <Card>
-            <CardHeader title="Track History" subtitle={`${d.trackPoints?.length ?? 0} points recorded`} icon={<Layers className="w-4 h-4" />} />
-            <div className="space-y-2">
-              {(d.trackPoints ?? []).map((pt: any, i: number) => (
-                <div key={i} className="flex flex-col gap-1 rounded border border-transparent py-1 text-xs sm:flex-row sm:items-center sm:gap-3">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${i === (d.trackPoints.length - 1) ? 'bg-cyan-400' : 'bg-[var(--ocean-border)]'}`} />
-                  <span className="font-mono text-[var(--ocean-text-dim)] sm:w-36">{formatDateTime(pt.timestamp)}</span>
-                  <span className="text-[var(--ocean-text-muted)]">{pt.lat.toFixed(4)}°N, {Math.abs(pt.lng).toFixed(4)}°W</span>
-                  {i === (d.trackPoints.length - 1) && <Badge variant="live" size="xs">CURRENT</Badge>}
-                </div>
-              ))}
+            <CardHeader title="Neural & Environmental Risk Breakdown" />
+            <div className="space-y-3">
+              {d.riskFactors && d.riskFactors.length > 0 ? (
+                d.riskFactors.map((rf: any, i: number) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[var(--ocean-text)]">{rf.label}</span>
+                      <span className="font-mono text-cyan-400 font-bold">+{rf.score} pts</span>
+                    </div>
+                    {rf.description && (
+                      <p className="text-[11px] text-[var(--ocean-text-muted)]">{rf.description}</p>
+                    )}
+                    <div className="h-1.5 rounded-full bg-[var(--ocean-border)] overflow-hidden">
+                      <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${Math.min(100, rf.score * 3)}%` }} />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-[var(--ocean-text-muted)]">No elevated risk factors detected for this object.</p>
+              )}
             </div>
           </Card>
         </div>
 
-        {/* Right: risk score */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader title="Risk Assessment" icon={<AlertTriangle className="w-4 h-4" />} />
-            <div className="flex justify-center mb-6">
-              <RiskGauge score={d.riskScore} />
-            </div>
-            <div className="space-y-2.5">
-              <p className="text-[10px] text-[var(--ocean-text-muted)] uppercase tracking-wider font-semibold">
-                Risk Breakdown
-              </p>
-              {d.riskFactors.map((f: any) => (
-                <div key={f.label}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-[var(--ocean-text-dim)]">{f.label}</span>
-                    <span className="font-mono text-red-400">+{f.score}</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-[var(--ocean-border)] overflow-hidden">
-                    <div className="h-full rounded-full bg-gradient-to-r from-red-500/60 to-red-400"
-                      style={{ width: `${(f.score / 30) * 100}%` }} />
-                  </div>
-                  <p className="text-[10px] text-[var(--ocean-text-muted)] mt-0.5">{f.description}</p>
-                </div>
-              ))}
-            </div>
+        {/* Right Column: Risk Gauge + Coordinates & Track Points */}
+        <div className="space-y-6">
+          <Card className="flex flex-col items-center p-6 text-center">
+            <h3 className="text-sm font-semibold text-[var(--ocean-text)] mb-4">Cumulative Environmental Risk</h3>
+            <RiskGauge score={d.riskScore} />
+            <p className="text-xs text-[var(--ocean-text-muted)] mt-4 leading-relaxed">
+              Calculated using object surface area, proximity to shipping lanes, drift velocity, and marine protected zone boundaries.
+            </p>
           </Card>
 
-          {/* Location */}
+          {/* Track History */}
           <Card>
-            <CardHeader title="Location" icon={<MapPin className="w-4 h-4" />} />
-            <div className="space-y-2">
-              <div className="p-3 rounded-lg bg-[var(--ocean-surface)] border border-[var(--ocean-border)] font-mono text-xs">
-                <p className="text-cyan-400">{d.lat.toFixed(4)}°N</p>
-                <p className="text-cyan-400">{Math.abs(d.lng).toFixed(4)}°W</p>
-                <p className="text-[var(--ocean-text-muted)] mt-1">{d.locationLabel}</p>
-              </div>
-            </div>
-          </Card>
-
-          {/* Timeline */}
-          <Card>
-            <CardHeader title="Timeline" icon={<Clock className="w-4 h-4" />} />
+            <CardHeader title="Tracking History & Drift" subtitle={`Track ID ${d.trackId}`} />
             <div className="space-y-3">
-              {[
-                { label: 'First detected', time: d.detectedAt, color: 'bg-cyan-400' },
-                { label: 'Confirmed', time: d.detectedAt, color: 'bg-green-400' },
-                { label: 'Tracking active', time: d.detectedAt, color: 'bg-amber-400' },
-              ].map(ev => (
-                <div key={ev.label} className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ev.color}`} />
-                  <div>
-                    <p className="text-xs text-[var(--ocean-text-dim)]">{ev.label}</p>
-                    <p className="text-[10px] text-[var(--ocean-text-muted)] font-mono">{formatDateTime(ev.time)}</p>
+              {(track?.points || d.trackPoints || []).map((pt: any, i: number) => (
+                <div key={i} className="flex items-start gap-3 relative text-xs">
+                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 flex-shrink-0 mt-1" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-mono font-semibold text-[var(--ocean-text)]">
+                      {pt.lat?.toFixed(4)}°N, {pt.lng?.toFixed(4)}°E
+                    </p>
+                    <p className="text-[10px] text-[var(--ocean-text-muted)] font-mono">
+                      {formatDateTime(pt.timestamp)} {pt.confidence ? `· ${pt.confidence}% confidence` : ''}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -284,22 +306,26 @@ export default function DetectionDetail() {
         </div>
       </div>
 
+      {/* False Positive Confirmation Modal */}
       <Modal
         isOpen={showFalsePositive}
         onClose={() => setShowFalsePositive(false)}
-        title="Mark as false positive?"
-        subtitle="This removes the detection from the active response workflow."
+        title="Confirm False Positive Decision"
         size="sm"
-        footer={
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setShowFalsePositive(false)}>Cancel</Button>
-            <Button variant="danger" size="sm" onClick={confirmFalsePositive}>Confirm false positive</Button>
-          </>
-        }
       >
-        <p className="text-sm leading-relaxed text-[var(--ocean-text-dim)]">
-          Confirm only after reviewing the source evidence. The action is recorded against detection {d.id}.
-        </p>
+        <div className="space-y-4">
+          <p className="text-xs text-[var(--ocean-text-dim)]">
+            Flagging <strong>{d.id}</strong> as a false positive will immediately update operational logs and suppress this target from cleanup dispatches.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowFalsePositive(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" loading={actionLoading} onClick={confirmFalsePositive}>
+              Confirm False Positive
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

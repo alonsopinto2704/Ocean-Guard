@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import math
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
+from starlette.concurrency import run_in_threadpool
 
-from .learning import LearningStore
+from .learning import LearningStore, MAX_FRAME_ANNOTATIONS, RevisionConflictError
 from .model import MarineDebrisDetector, ModelNotReadyError
 
 
@@ -17,10 +19,21 @@ learning_store = LearningStore()
 
 
 class BoundingBoxCorrection(BaseModel):
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-    width: float = Field(gt=0, le=1)
-    height: float = Field(gt=0, le=1)
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = Field(ge=0, le=1, strict=True, allow_inf_nan=False)
+    y: float = Field(ge=0, le=1, strict=True, allow_inf_nan=False)
+    width: float = Field(gt=0, le=1, strict=True, allow_inf_nan=False)
+    height: float = Field(gt=0, le=1, strict=True, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def fits_inside_image(self):
+        values = (self.x, self.y, self.width, self.height)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Bounding box values must be finite numbers.")
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("Bounding boxes must fit entirely within the image.")
+        return self
 
 
 class DetectionFeedback(BaseModel):
@@ -30,6 +43,43 @@ class DetectionFeedback(BaseModel):
     correctedClass: str | None = None
     correctedBoundingBox: BoundingBoxCorrection | None = None
     reviewer: str | None = None
+
+
+class FrameReviewAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    annotationId: str = Field(min_length=1, max_length=128)
+    sourceDetectionId: str | None = Field(default=None, min_length=1, max_length=128)
+    verdict: Literal["CONFIRMED", "FALSE_POSITIVE", "CORRECTED", "MISSED"]
+    correctedClass: str | None = Field(default=None, min_length=1, max_length=128)
+    correctedBoundingBox: BoundingBoxCorrection | None = None
+
+    @model_validator(mode="after")
+    def validate_disposition(self):
+        if self.verdict in {"CONFIRMED", "FALSE_POSITIVE"}:
+            if self.sourceDetectionId is None:
+                raise ValueError(f"{self.verdict} annotations require sourceDetectionId.")
+            if self.correctedClass is not None or self.correctedBoundingBox is not None:
+                raise ValueError(f"{self.verdict} annotations cannot include corrections.")
+        elif self.verdict == "CORRECTED":
+            if self.sourceDetectionId is None:
+                raise ValueError("CORRECTED annotations require sourceDetectionId.")
+            if self.correctedClass is None and self.correctedBoundingBox is None:
+                raise ValueError("CORRECTED annotations require a corrected class or bounding box.")
+        elif self.verdict == "MISSED":
+            if self.sourceDetectionId is not None:
+                raise ValueError("MISSED annotations cannot reference an original prediction.")
+            if self.correctedClass is None or self.correctedBoundingBox is None:
+                raise ValueError("MISSED annotations require a known class and bounding box.")
+        return self
+
+
+class FrameReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expectedRevision: int = Field(ge=0, strict=True)
+    reviewer: str | None = Field(default=None, max_length=200)
+    annotations: list[FrameReviewAnnotation] = Field(max_length=MAX_FRAME_ANNOTATIONS)
 
 app = FastAPI(
     title="Espada Intelligence",
@@ -46,7 +96,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=["*"],
 )
 
@@ -76,8 +126,8 @@ async def detect(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=413, detail="Image exceeds the 20 MB limit.")
 
     try:
-        result = detector.predict(image_bytes, file.filename or "upload")
-        analysis_id = learning_store.record_analysis(
+        result = await run_in_threadpool(detector.predict, image_bytes, file.filename or "upload")
+        analysis_id = await run_in_threadpool(learning_store.record_analysis,
             image_bytes, file.filename or "upload", result
         )
         return {**result, "analysisId": analysis_id}
@@ -88,22 +138,25 @@ async def detect(file: UploadFile = File(...)) -> dict:
 
 
 @app.post("/v1/feedback")
-def feedback(payload: DetectionFeedback) -> dict:
-    if payload.correctedClass and payload.correctedClass not in detector.classes:
-        raise HTTPException(status_code=422, detail="Corrected class is not in the model class list.")
+def feedback() -> dict:
+    raise HTTPException(
+        status_code=410,
+        detail="Per-box feedback has been retired. Submit whole-frame reviews via PUT /v1/analyses/{analysis_id}/review.",
+    )
+
+
+@app.put("/v1/analyses/{analysis_id}/review")
+def save_frame_review(analysis_id: str, payload: FrameReview) -> dict:
     try:
-        return learning_store.save_feedback(
-            analysis_id=payload.analysisId,
-            detection_id=payload.detectionId,
-            verdict=payload.verdict,
-            corrected_class=payload.correctedClass,
-            corrected_box=(
-                payload.correctedBoundingBox.model_dump()
-                if payload.correctedBoundingBox
-                else None
-            ),
+        return learning_store.save_frame_review(
+            analysis_id=analysis_id,
+            expected_revision=payload.expectedRevision,
+            annotations=[annotation.model_dump() for annotation in payload.annotations],
             reviewer=payload.reviewer,
+            allowed_classes=set(detector.classes),
         )
+    except RevisionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

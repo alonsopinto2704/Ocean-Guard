@@ -1,14 +1,16 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LoadingState } from '../ui/StateComponents';
 import type { UserRole } from '../../types';
 
 interface ProtectedRouteProps {
-  children: React.ReactNode;
+  children: ReactNode;
   allowedRoles?: UserRole[];
 }
 
+/** Auth gate: shows a loader while validating, redirects to /login when signed
+ *  out (remembering the origin), and enforces role restrictions when provided. */
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();

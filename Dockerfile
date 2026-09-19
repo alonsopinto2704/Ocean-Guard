@@ -19,7 +19,7 @@ COPY package.json ./
 RUN npm install -g pnpm && pnpm install --prod --ignore-scripts
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/dist/server.cjs ./server.cjs
+COPY --from=builder /app/build ./build
 
 EXPOSE 3000
-CMD ["node", "dist/server.cjs"]
+CMD ["node", "build/server.cjs"]

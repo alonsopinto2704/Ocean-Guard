@@ -1,74 +1,34 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
+import { storage, StoredUser } from './src/server/storage';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '0.0.0.0';
 const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+
+function positiveTimeout(name: string, fallback: number) {
+  const configured = Number(process.env[name]);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+const AI_REQUEST_TIMEOUT_MS = positiveTimeout('AI_SERVICE_REQUEST_TIMEOUT_MS', 6000);
+const AI_DETECT_TIMEOUT_MS = positiveTimeout('AI_SERVICE_DETECT_TIMEOUT_MS', 60000);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-app.use((req, res, next) => {
+app.use((req, _res, next) => {
   console.log(`[REQ] ${req.method} ${req.url}`);
   next();
 });
 
-// ============================================================
-// MOCK DATABASE
-// ============================================================
-const mockDb = {
-  users: [
-    { id: 'USR-01', name: 'Cmdr. Elena Vance',   email: 'admin@oceanguard.ai',    role: 'ADMIN',                roleTitle: 'Chief Operations Administrator', organizationName: 'OceanGuard Central Command', status: 'ACTIVE' },
-    { id: 'USR-02', name: 'Marcus Brody',         email: 'operator@oceanguard.ai', role: 'FIELD_OPERATOR',       roleTitle: 'Senior Marine Radar & Drone Pilot', organizationName: 'OceanGuard Coastal Watch', status: 'ACTIVE' },
-    { id: 'USR-03', name: 'Dr. Asha Rao',         email: 'officer@oceanguard.ai',  role: 'ENVIRONMENTAL_OFFICER', roleTitle: 'Lead Oceanographer', organizationName: 'Coastal Environmental Unit', status: 'ACTIVE' },
-    { id: 'USR-04', name: 'Captain Javier Silva', email: 'cleanup@oceanguard.ai',  role: 'CLEANUP_TEAM',         roleTitle: 'Coastal Team A Lead', organizationName: 'Rapid Marine Cleanup Fleet', status: 'ACTIVE' },
-  ],
-  detectionsCount: 1284,
-  highRiskCount:   21,
-  hotspotsCount:   18,
-  activeAlertsCount: 7,
-  onlineCameras: '14/15',
-};
-
-const DETECTIONS = [
-  { id: 'DET-1042', trackId: 'TRK-1042', className: 'Fishing Net',    category: 'Fishing Gear', confidence: 89, status: 'TRACKING',   riskScore: 89, riskLevel: 'CRITICAL', estimatedSize: '3.6 m²', estimatedDistance: '420m', estimatedMassKg: 16.2, lat: 35.1,  lng: -158.3, locationLabel: 'Zone 4 N · Pacific',    cameraId: 'CAM-04', cameraName: 'Alpha 4', zoneId: 'Z4', zoneName: 'Zone 4', detectedAt: new Date(Date.now() - 5  * 60000).toISOString(), source: 'CAMERA', riskFactors: [{label:'Large size',score:24},{label:'High density',score:20},{label:'Shipping route',score:18},{label:'Moving',score:14},{label:'Sensitive zone',score:13}] },
-  { id: 'DET-1105', trackId: 'TRK-1105', className: 'Rope',           category: 'Fishing Gear', confidence: 77, status: 'NEW',        riskScore: 38, riskLevel: 'MEDIUM',   estimatedSize: '1.2 m²', estimatedDistance: '280m', estimatedMassKg: 2.1,  lat: 20.4,  lng: 145.6,  locationLabel: 'Zone 2 · W Pacific',    cameraId: 'CAM-08', cameraName: 'Gamma 8', zoneId: 'Z2', zoneName: 'Zone 2', detectedAt: new Date(Date.now() - 28 * 60000).toISOString(), source: 'CAMERA', riskFactors: [] },
-  { id: 'DET-1210', trackId: 'TRK-1210', className: 'Mixed Waste',    category: 'Unknown',      confidence: 68, status: 'VALIDATING', riskScore: 72, riskLevel: 'HIGH',     estimatedSize: '5.1 m²', estimatedDistance: '620m', estimatedMassKg: 28.4, lat: 35.1,  lng: -148.4, locationLabel: 'Zone 4 S · Pacific',   cameraId: 'CAM-04', cameraName: 'Alpha 4', zoneId: 'Z4', zoneName: 'Zone 4', detectedAt: new Date(Date.now() - 42 * 60000).toISOString(), source: 'UPLOAD',  riskFactors: [] },
-  { id: 'DET-0902', trackId: 'TRK-902',  className: 'Plastic Bottle', category: 'Plastic',      confidence: 94, status: 'CONFIRMED',  riskScore: 42, riskLevel: 'MEDIUM',   estimatedSize: '0.5 m²', estimatedDistance: '140m', estimatedMassKg: 0.9,  lat: 28.5,  lng: -140.2, locationLabel: 'Pacific Gyre · Sector A', cameraId: 'CAM-02', cameraName: 'Beta 2', zoneId: 'Z1', zoneName: 'Zone 1', detectedAt: new Date(Date.now() - 12 * 60000).toISOString(), source: 'DRONE', riskFactors: [] },
-  { id: 'DET-0988', trackId: 'TRK-988',  className: 'Plastic Bag',    category: 'Plastic',      confidence: 91, status: 'CONFIRMED',  riskScore: 55, riskLevel: 'MEDIUM',   estimatedSize: '0.9 m²', estimatedDistance: '190m', estimatedMassKg: 0.6,  lat: 14.2,  lng: -155.8, locationLabel: 'Zone 1 · N Pacific',    cameraId: 'CAM-01', cameraName: 'Alpha 1', zoneId: 'Z1', zoneName: 'Zone 1', detectedAt: new Date(Date.now() - 18 * 60000).toISOString(), source: 'CAMERA', riskFactors: [] },
-];
-
-const ALERTS = [
-  { id: 'ALT-001', type: 'RISK_THRESHOLD', title: 'Large Debris Cluster Detected',      priority: 'CRITICAL', status: 'TRIGGERED',     triggeredAt: new Date(Date.now() -  8*60000).toISOString(), lat: 35.1, lng: -158.3, locationLabel: 'Zone 4 N · Pacific', description: '47-item cluster identified near Zone 4', detectionId: 'DET-1042' },
-  { id: 'ALT-002', type: 'DETECTION',      title: 'Fishing Net — Track #1042',          priority: 'HIGH',     status: 'ACKNOWLEDGED',  triggeredAt: new Date(Date.now() - 22*60000).toISOString(), lat: 28.5, lng: -140.2, locationLabel: 'Pacific Gyre', description: '3.6m² net moving at 0.4 m/s', detectionId: 'DET-1042' },
-  { id: 'ALT-003', type: 'DEVICE',         title: 'Camera CAM-15 Offline',              priority: 'MEDIUM',   status: 'INVESTIGATING', triggeredAt: new Date(Date.now() - 47*60000).toISOString(), lat: 24.0, lng: -138.0, locationLabel: 'Sector B', description: 'No heartbeat for 12 minutes' },
-  { id: 'ALT-004', type: 'RISK_THRESHOLD', title: 'High Density — Sector A',            priority: 'HIGH',     status: 'ACTION_REQUIRED', triggeredAt: new Date(Date.now() - 95*60000).toISOString(), lat: 14.2, lng: -155.8, locationLabel: 'Sector A', description: '42 detections in 2km radius' },
-  { id: 'ALT-005', type: 'DETECTION',      title: 'Plastic Debris — Track #988',        priority: 'HIGH',     status: 'ASSIGNED',      triggeredAt: new Date(Date.now()-140*60000).toISOString(), lat: 32.1, lng: -148.4, locationLabel: 'Zone 2 Coastal', description: 'Mixed plastic cluster 82 kg', detectionId: 'DET-0988' },
-  { id: 'ALT-006', type: 'ZONE_BREACH',    title: 'Debris in Marine Sanctuary Zone',   priority: 'CRITICAL', status: 'TRIGGERED',     triggeredAt: new Date(Date.now() -  3*60000).toISOString(), lat: 20.4, lng: 145.6,  locationLabel: 'Marine Sanctuary Z2', description: 'Debris detected within protected boundary' },
-  { id: 'ALT-007', type: 'DETECTION',      title: 'Mixed Waste — High Confidence',     priority: 'MEDIUM',   status: 'TRIGGERED',     triggeredAt: new Date(Date.now() -  1*60000).toISOString(), lat: 5.8,  lng: -110.2, locationLabel: 'Central Pacific', description: '28 kg mixed waste cluster', detectionId: 'DET-1210' },
-];
-
-const CAMERAS = [
-  { id: 'CAM-01', name: 'Alpha 1 — Zone 4 N', status: 'STREAMING', fps: 29.8, resolution: '1080p', lat: 35.1, lng: -158.3, zoneId: 'Z4', location: 'Zone 4 North', uptimePercent: 99.8, lastHeartbeat: new Date().toISOString() },
-  { id: 'CAM-02', name: 'Beta 2 — Pacific Gyre', status: 'STREAMING', fps: 30.0, resolution: '4K', lat: 28.5, lng: -140.2, zoneId: 'Z1', location: 'Pacific Gyre', uptimePercent: 100, lastHeartbeat: new Date().toISOString() },
-  { id: 'CAM-04', name: 'Alpha 4 — Zone 4 S', status: 'STREAMING', fps: 28.3, resolution: '1080p', lat: 35.1, lng: -148.4, zoneId: 'Z4', location: 'Zone 4 South', uptimePercent: 99.1, lastHeartbeat: new Date().toISOString() },
-  { id: 'CAM-08', name: 'Gamma 8 — Coastal', status: 'LOW_FPS',   fps: 12.1, resolution: '1080p', lat: 20.4, lng: 145.6, zoneId: 'Z2', location: 'Coastal Zone', uptimePercent: 92.4, lastHeartbeat: new Date(Date.now() - 25000).toISOString() },
-  { id: 'CAM-15', name: 'Delta 15 — Sector B', status: 'DISCONNECTED', fps: 0, resolution: '720p', lat: 24.0, lng: -138.0, zoneId: 'Z3', location: 'Sector B', uptimePercent: 88.2, lastHeartbeat: new Date(Date.now() - 720000).toISOString() },
-];
-
-const HOTSPOTS = [
-  { id: 'HS-01', name: 'Pacific Gyre Core',    lat: 28.5,  lng: -140.2, risk: 'CRITICAL', detectionCount: 312, estimatedMassKg: 1840, status: 'ACTIVE',    radius: 42000, trend: 'INCREASING', zoneId: 'Z1', dominantClass: 'Mixed Waste',   firstDetected: '2026-06-01T00:00:00Z', lastUpdated: new Date().toISOString() },
-  { id: 'HS-02', name: 'Zone 4 Cluster',       lat: 35.1,  lng: -158.3, risk: 'CRITICAL', detectionCount: 204, estimatedMassKg: 982,  status: 'ACTIVE',    radius: 28000, trend: 'STABLE',     zoneId: 'Z4', dominantClass: 'Fishing Net',   firstDetected: '2026-07-15T00:00:00Z', lastUpdated: new Date().toISOString() },
-  { id: 'HS-03', name: 'North Pacific Band',   lat: 14.2,  lng: -155.8, risk: 'HIGH',     detectionCount: 148, estimatedMassKg: 624,  status: 'ACTIVE',    radius: 22000, trend: 'INCREASING', zoneId: 'Z1', dominantClass: 'Plastic Bag',   firstDetected: '2026-07-20T00:00:00Z', lastUpdated: new Date().toISOString() },
-  { id: 'HS-04', name: 'Oregon Shelf Zone',    lat: 42.1,  lng: -130.5, risk: 'HIGH',     detectionCount: 98,  estimatedMassKg: 410,  status: 'MONITORED', radius: 15000, trend: 'STABLE',     zoneId: 'Z3', dominantClass: 'Metal',         firstDetected: '2026-08-01T00:00:00Z', lastUpdated: new Date().toISOString() },
-  { id: 'HS-05', name: 'Western Pacific',      lat: 20.4,  lng: 145.6,  risk: 'MEDIUM',   detectionCount: 74,  estimatedMassKg: 290,  status: 'ACTIVE',    radius: 18000, trend: 'DECREASING', zoneId: 'Z2', dominantClass: 'Rope',          firstDetected: '2026-08-10T00:00:00Z', lastUpdated: new Date().toISOString() },
-];
-
-const CLEANUP_MISSIONS = [
-  { id: 'CM-204', title: 'Zone 4 Critical Debris Cluster', status: 'IN_PROGRESS', priority: 'CRITICAL', zoneId: 'Z4', zoneName: 'Zone 4', lat: 35.1, lng: -158.3, locationLabel: 'Zone 4 N · 35.1°N 158.3°W', detectionCount: 146, estimatedMassKg: 82, assignedTeam: 'Coastal Team A', scheduledAt: new Date(Date.now()-3*3600000).toISOString(), startedAt: new Date(Date.now()-1.5*3600000).toISOString(), createdAt: new Date(Date.now()-5*3600000).toISOString(), createdBy: 'admin', evidence: [] },
-  { id: 'CM-202', title: 'Pacific Gyre Fishing Net Recovery', status: 'ASSIGNED', priority: 'HIGH', zoneId: 'Z1', zoneName: 'Zone 1', lat: 28.5, lng: -140.2, locationLabel: 'Pacific Gyre', detectionCount: 48, estimatedMassKg: 28, assignedTeam: 'Marine Ops Beta', scheduledAt: new Date(Date.now()+2*3600000).toISOString(), createdAt: new Date(Date.now()-8*3600000).toISOString(), createdBy: 'operator', evidence: [] },
-  { id: 'CM-201', title: 'Zone 2 Coastal Plastic Sweep', status: 'COMPLETED', priority: 'MEDIUM', zoneId: 'Z2', zoneName: 'Zone 2', lat: 19.8, lng: -157.4, locationLabel: 'Zone 2 Inshore', detectionCount: 62, estimatedMassKg: 24, assignedTeam: 'Coastal Team B', completedAt: new Date(Date.now()-86400000*0.8).toISOString(), createdAt: new Date(Date.now()-3*86400000).toISOString(), createdBy: 'officer', evidence: [] },
-];
+// Helper to strip sensitive security fields
+/** Strip password hash + salt before any user object leaves the server. */
+function sanitizeUser(u: StoredUser) {
+  const { passwordHash, salt, ...safe } = u;
+  return safe;
+}
 
 // ============================================================
 // SSE CLIENTS
@@ -77,8 +37,57 @@ const sseClients: Response[] = [];
 
 function broadcastEvent(type: string, payload: any) {
   const msg = `data: ${JSON.stringify({ type, payload, timestamp: new Date().toISOString() })}\n\n`;
-  sseClients.forEach((c: any) => c.write(msg));
+  sseClients.forEach((c: any) => {
+    try {
+      c.write(msg);
+    } catch { /* client disconnected */ }
+  });
 }
+
+// ============================================================
+// AUTHENTICATION & RBAC MIDDLEWARE
+// ============================================================
+/** Bearer-token auth gate. Without allowedRoles any ACTIVE authenticated user
+ *  passes; with a role set, non-members get 403. Attaches the user to res.locals. */
+function requireApiUser(allowedRoles?: Set<string>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const authorization = req.headers.authorization || '';
+    const token = authorization.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+      res.status(401).json({ message: 'Authentication is required.' });
+      return;
+    }
+
+    // Check storage session
+    const session = storage.findSession(token);
+    const user = session ? storage.findUserById(session.userId) : undefined;
+
+    if (!user) {
+      res.status(401).json({ message: 'Session is invalid or has expired. Please sign in again.' });
+      return;
+    }
+
+    if (user.status !== 'ACTIVE') {
+      res.status(403).json({ message: 'This operator account has been deactivated or suspended.' });
+      return;
+    }
+
+    if (allowedRoles && !allowedRoles.has(user.role)) {
+      res.status(403).json({ message: `Access denied. Operator role ${user.role} does not have permission to perform this action.` });
+      return;
+    }
+
+    res.locals.authenticatedUser = user;
+    next();
+  };
+}
+
+// Role sets for each protected route group (RBAC matrix).
+const ALL_ROLES = new Set(['ADMIN', 'FIELD_OPERATOR', 'ENVIRONMENTAL_OFFICER', 'CLEANUP_TEAM']);
+const ESPADA_REVIEW_ROLES = new Set(['ADMIN', 'FIELD_OPERATOR', 'ENVIRONMENTAL_OFFICER']);
+const CLEANUP_MANAGE_ROLES = new Set(['ADMIN', 'FIELD_OPERATOR', 'CLEANUP_TEAM']);
+const REPORT_GENERATE_ROLES = new Set(['ADMIN', 'ENVIRONMENTAL_OFFICER', 'FIELD_OPERATOR']);
+const ADMIN_ROLES = new Set(['ADMIN']);
 
 // ============================================================
 // API ROUTES
@@ -86,13 +95,16 @@ function broadcastEvent(type: string, payload: any) {
 
 // Health
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ONLINE', version: '1.4.0', service: 'OceanGuard AI Backend', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ONLINE',
+    version: '1.4.0',
+    service: 'OceanGuard AI Backend',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // SSE
 app.get('/api/events', (req: Request, res: Response) => {
-  // Vercel functions cannot hold a durable SSE connection. A 204 tells
-  // EventSource clients not to reconnect; container deployments keep SSE.
   if (process.env.VERCEL) {
     res.status(204).end();
     return;
@@ -111,24 +123,107 @@ app.get('/api/events', (req: Request, res: Response) => {
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 app.post('/api/auth/login', (req: Request, res: Response) => {
-  const { email } = req.body;
-  const user = mockDb.users.find(u => u.email.toLowerCase() === (email || '').toLowerCase()) ?? mockDb.users[1];
-  res.json({ token: `jwt-token-${user.id}-${Date.now()}`, user });
+  const { email, password } = req.body;
+  if (!email || !password) {
+    res.status(400).json({ message: 'Email and password are required.' });
+    return;
+  }
+
+  const user = storage.findUserByEmail(email);
+  if (!user) {
+    res.status(401).json({ message: 'Invalid email or password.' });
+    return;
+  }
+
+  if (user.status !== 'ACTIVE') {
+    res.status(403).json({ message: 'This operator account has been deactivated.' });
+    return;
+  }
+
+  const valid = storage.verifyPassword(user, password);
+  if (!valid) {
+    res.status(401).json({ message: 'Invalid email or password.' });
+    return;
+  }
+
+  const session = storage.createSession(user);
+  res.json({
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: sanitizeUser(user),
+  });
 });
 
-app.post('/api/auth/logout', (_req: Request, res: Response) => {
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const authorization = req.headers.authorization || '';
+  const token = authorization.replace(/^Bearer\s+/i, '').trim();
+  if (token) {
+    storage.removeSession(token);
+  }
   res.json({ success: true });
 });
 
 app.get('/api/auth/me', (req: Request, res: Response) => {
-  const auth = req.headers.authorization ?? '';
-  const userId = auth.match(/^Bearer jwt-token-(USR-\d+)-\d+$/)?.[1];
-  const user = mockDb.users.find(u => u.id === userId);
-  if (!user) {
-    res.status(401).json({ error: 'Invalid or expired session' });
+  const authorization = req.headers.authorization || '';
+  const token = authorization.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    res.status(401).json({ message: 'No authentication token provided.' });
     return;
   }
-  res.json({ user });
+
+  const session = storage.findSession(token);
+  const user = session ? storage.findUserById(session.userId) : undefined;
+
+  if (!user || user.status !== 'ACTIVE') {
+    res.status(401).json({ message: 'Invalid or expired session' });
+    return;
+  }
+  res.json({ user: sanitizeUser(user) });
+});
+
+// Account recovery & password reset
+app.post('/api/auth/recover', (_req: Request, res: Response) => {
+  // Recovery needs a verified delivery channel; never return reset tokens publicly.
+  res.status(503).json({ message: 'Self-service recovery is not configured. Contact your administrator to restore access.' });
+});
+
+app.post('/api/auth/reset-password', (req: Request, res: Response) => {
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword || newPassword.length < 6) {
+    res.status(400).json({ message: 'Valid token and minimum 6-character password are required.' });
+    return;
+  }
+  const ok = storage.resetPasswordWithToken(token, newPassword);
+  if (!ok) {
+    res.status(400).json({ message: 'Invalid or expired recovery token.' });
+    return;
+  }
+  res.json({ success: true, message: 'Password updated successfully. You may now sign in.' });
+});
+
+// ── Public Portal Access Requests ───────────────────────────────────────────
+app.post('/api/access-requests', (req: Request, res: Response) => {
+  const { organization, email } = req.body;
+  if (!organization || !organization.trim() || !email || !email.trim()) {
+    res.status(400).json({ message: 'Organization name and institutional email are required.' });
+    return;
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email.trim())) {
+    res.status(400).json({ message: 'Please provide a valid institutional email address.' });
+    return;
+  }
+
+  const accessReq = storage.createAccessRequest(organization, email);
+  res.status(201).json({
+    success: true,
+    message: `Sentinel access request ${accessReq.id} recorded for ${accessReq.organization}.`,
+    request: accessReq,
+  });
+});
+
+app.get('/api/admin/access-requests', requireApiUser(ADMIN_ROLES), (_req: Request, res: Response) => {
+  res.json({ requests: storage.getAccessRequests() });
 });
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
@@ -138,13 +233,22 @@ app.get('/api/dashboard/summary', async (_req: Request, res: Response) => {
     const espada = await fetchAiJson('/v1/model');
     aiStatus = espada.ready ? 'RUNNING' : espada.state === 'ERROR' ? 'MODEL_ERROR' : 'STOPPED';
   } catch { /* The dashboard remains available while Espada is offline. */ }
+
+  const detections = storage.getDetections();
+  const criticalCount = detections.filter(d => d.riskLevel === 'CRITICAL' || d.riskLevel === 'HIGH').length;
+  const hotspots = storage.getHotspots();
+  const activeAlerts = storage.getAlerts().filter(a => ['TRIGGERED', 'ACKNOWLEDGED', 'ACTION_REQUIRED', 'ASSIGNED'].includes(a.status));
+  const activeMissions = storage.getCleanupMissions().filter(m => ['IN_PROGRESS', 'ASSIGNED', 'SCHEDULED'].includes(m.status));
+  const cameras = storage.getCameras();
+  const onlineCameras = cameras.filter(c => c.status === 'STREAMING' || c.status === 'ONLINE').length;
+
   res.json({
-    debrisDetected: mockDb.detectionsCount,
-    highRiskIncidents: mockDb.highRiskCount,
-    activeHotspots: mockDb.hotspotsCount,
-    activeAlerts: mockDb.activeAlertsCount,
-    cleanupMissions: CLEANUP_MISSIONS.filter(m => ['IN_PROGRESS','ASSIGNED'].includes(m.status)).length,
-    camerasOnline: mockDb.onlineCameras,
+    debrisDetected: detections.length,
+    highRiskIncidents: criticalCount,
+    activeHotspots: hotspots.filter(h => h.status === 'ACTIVE').length,
+    activeAlerts: activeAlerts.length,
+    cleanupMissions: activeMissions.length,
+    camerasOnline: `${onlineCameras}/${cameras.length}`,
     systemStatus: 'ONLINE',
     aiStatus,
   });
@@ -172,142 +276,297 @@ app.get('/api/dashboard/system-health', async (_req: Request, res: Response) => 
     ai = espada.ready ? 'RUNNING' : espada.state === 'ERROR' ? 'MODEL_ERROR' : 'STOPPED';
     aiLatencyMs = espada.metrics?.inferenceMs ?? 0;
   } catch { /* Report a model error without taking down the main application. */ }
-  res.json({ system: 'ONLINE', camera: 'STREAMING', ai, gps: 'VALID', internet: 'ONLINE', activeCameras: 14, totalCameras: 15, aiLatencyMs, fps: 29.8, uptime: '99.7%' });
+
+  const cameras = storage.getCameras();
+  const activeCameras = cameras.filter(c => c.status === 'STREAMING' || c.status === 'ONLINE').length;
+
+  res.json({
+    system: 'ONLINE',
+    camera: activeCameras > 0 ? 'STREAMING' : 'NO_SIGNAL',
+    ai,
+    gps: 'VALID',
+    internet: 'ONLINE',
+    activeCameras,
+    totalCameras: cameras.length,
+    aiLatencyMs,
+    fps: 29.8,
+    uptime: '99.7%',
+  });
 });
 
 app.get('/api/dashboard/recent-detections', (_req: Request, res: Response) => {
-  res.json({ detections: DETECTIONS.slice(0, 5) });
+  res.json({ detections: storage.getDetections().slice(0, 5) });
 });
 
 app.get('/api/dashboard/alerts', (_req: Request, res: Response) => {
-  res.json({ alerts: ALERTS.filter(a => ['TRIGGERED','ACKNOWLEDGED','ACTION_REQUIRED'].includes(a.status)).slice(0, 5) });
+  res.json({
+    alerts: storage.getAlerts().filter(a => ['TRIGGERED', 'ACKNOWLEDGED', 'ACTION_REQUIRED'].includes(a.status)).slice(0, 5),
+  });
 });
 
 // ── Monitoring ───────────────────────────────────────────────────────────────
 app.get('/api/monitoring/cameras', (_req: Request, res: Response) => {
-  res.json({ cameras: CAMERAS });
+  res.json({ cameras: storage.getCameras() });
 });
 
 app.get('/api/monitoring/cameras/:id', (req: Request, res: Response) => {
-  const cam = CAMERAS.find(c => c.id === req.params.id) ?? CAMERAS[0];
+  const cam = storage.getCameraById(req.params.id);
+  if (!cam) {
+    res.status(404).json({ message: `Camera ${req.params.id} not found.` });
+    return;
+  }
   res.json(cam);
 });
 
+app.patch('/api/monitoring/cameras/:id', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateCamera(req.params.id, req.body, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: `Camera ${req.params.id} not found.` });
+    return;
+  }
+  broadcastEvent('CAMERA_UPDATE', updated);
+  res.json(updated);
+});
+
+// ── Devices & Fleet ─────────────────────────────────────────────────────────
+app.get('/api/devices', (_req: Request, res: Response) => {
+  res.json({ devices: storage.getDevices() });
+});
+
+app.get('/api/devices/:id', (req: Request, res: Response) => {
+  const d = storage.getDeviceById(req.params.id);
+  if (!d) {
+    res.status(404).json({ message: `Device ${req.params.id} not found.` });
+    return;
+  }
+  res.json(d);
+});
+
+app.patch('/api/devices/:id', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateDevice(req.params.id, req.body, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: `Device ${req.params.id} not found.` });
+    return;
+  }
+  broadcastEvent('DEVICE_UPDATE', updated);
+  res.json(updated);
+});
+
 // ── Detections ───────────────────────────────────────────────────────────────
-app.get('/api/detections', (_req: Request, res: Response) => {
-  res.json({ detections: DETECTIONS, total: DETECTIONS.length });
+app.get('/api/detections', (req: Request, res: Response) => {
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const riskLevel = typeof req.query.riskLevel === 'string' ? req.query.riskLevel : undefined;
+  const query = typeof req.query.q === 'string' ? req.query.q : undefined;
+
+  const detections = storage.getDetections({ status, riskLevel, query });
+  res.json({ detections, total: detections.length });
 });
 
 app.get('/api/detections/:id', (req: Request, res: Response) => {
-  const d = DETECTIONS.find(det => det.id === req.params.id) ?? DETECTIONS[0];
+  const d = storage.getDetectionById(req.params.id);
+  if (!d) {
+    res.status(404).json({ message: `Detection ${req.params.id} not found.` });
+    return;
+  }
   res.json(d);
 });
 
 app.get('/api/detections/:id/track', (req: Request, res: Response) => {
-  const d = DETECTIONS.find(det => det.id === req.params.id) ?? DETECTIONS[0];
+  const d = storage.getDetectionById(req.params.id);
+  if (!d) {
+    res.status(404).json({ message: `Detection ${req.params.id} not found.` });
+    return;
+  }
+  const points = d.trackPoints && d.trackPoints.length > 0
+    ? d.trackPoints
+    : [
+        { lat: d.lat - 0.02, lng: d.lng + 0.02, timestamp: new Date(Date.now() - 35 * 60000).toISOString(), confidence: 87 },
+        { lat: d.lat - 0.01, lng: d.lng + 0.01, timestamp: new Date(Date.now() - 20 * 60000).toISOString(), confidence: 88 },
+        { lat: d.lat, lng: d.lng, timestamp: d.detectedAt, confidence: d.confidence },
+      ];
+
   res.json({
-    id: d.trackId, detectionId: d.id, className: d.className, status: 'ACTIVE',
-    firstSeen: new Date(Date.now() - 35 * 60000).toISOString(), lastSeen: new Date().toISOString(),
-    currentLat: d.lat, currentLng: d.lng, velocity: 0.4, heading: 320, confidence: d.confidence,
-    points: [
-      { lat: d.lat - 0.02, lng: d.lng + 0.02, timestamp: new Date(Date.now() - 35 * 60000).toISOString(), confidence: 87 },
-      { lat: d.lat - 0.01, lng: d.lng + 0.01, timestamp: new Date(Date.now() - 20 * 60000).toISOString(), confidence: 88 },
-      { lat: d.lat,        lng: d.lng,         timestamp: new Date().toISOString(), confidence: d.confidence },
-    ],
+    id: d.trackId,
+    detectionId: d.id,
+    className: d.className,
+    status: 'ACTIVE',
+    firstSeen: points[0].timestamp,
+    lastSeen: points[points.length - 1].timestamp,
+    currentLat: d.lat,
+    currentLng: d.lng,
+    velocity: 0.4,
+    heading: 320,
+    confidence: d.confidence,
+    points,
   });
 });
 
-app.patch('/api/detections/:id/status', (req: Request, res: Response) => {
-  const d = DETECTIONS.find(det => det.id === req.params.id) ?? DETECTIONS[0];
-  res.json({ ...d, status: req.body.status });
+app.patch('/api/detections/:id/status', requireApiUser(ESPADA_REVIEW_ROLES), (req: Request, res: Response) => {
+  const status = req.body.status;
+  if (!status) {
+    res.status(400).json({ message: 'Status is required.' });
+    return;
+  }
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateDetectionStatus(req.params.id, status, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: `Detection ${req.params.id} not found.` });
+    return;
+  }
+  broadcastEvent('DETECTION_UPDATE', updated);
+  res.json(updated);
 });
 
 // ── Alerts ───────────────────────────────────────────────────────────────────
 app.get('/api/alerts', (_req: Request, res: Response) => {
-  res.json({ alerts: ALERTS });
+  res.json({ alerts: storage.getAlerts() });
 });
 
 app.get('/api/alerts/:id', (req: Request, res: Response) => {
-  const a = ALERTS.find(al => al.id === req.params.id) ?? ALERTS[0];
+  const a = storage.getAlertById(req.params.id);
+  if (!a) {
+    res.status(404).json({ message: `Alert ${req.params.id} not found.` });
+    return;
+  }
   res.json(a);
 });
 
-app.patch('/api/alerts/:id/status', (req: Request, res: Response) => {
-  const a = ALERTS.find(al => al.id === req.params.id) ?? ALERTS[0];
-  const updated = { ...a, status: req.body.status };
+app.patch('/api/alerts/:id/status', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateAlertStatus(req.params.id, req.body.status, undefined, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: `Alert ${req.params.id} not found.` });
+    return;
+  }
   broadcastEvent('ALERT_UPDATE', updated);
   res.json(updated);
 });
 
-app.post('/api/alerts/:id/assign', (req: Request, res: Response) => {
-  const a = ALERTS.find(al => al.id === req.params.id) ?? ALERTS[0];
-  res.json({ ...a, status: 'ASSIGNED', assignedTo: req.body.assignedTo });
+app.post('/api/alerts/:id/assign', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateAlertStatus(req.params.id, 'ASSIGNED', req.body.assignedTo, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: `Alert ${req.params.id} not found.` });
+    return;
+  }
+  broadcastEvent('ALERT_UPDATE', updated);
+  res.json(updated);
 });
 
 // ── Hotspots ─────────────────────────────────────────────────────────────────
+// IMPORTANT: /api/hotspots/heatmap MUST be registered BEFORE /api/hotspots/:id
+app.get('/api/hotspots/heatmap', (_req: Request, res: Response) => {
+  const points = storage.getHotspots().map(h => [h.lat, h.lng, h.detectionCount / 100]);
+  res.json({ points });
+});
+
 app.get('/api/hotspots', (_req: Request, res: Response) => {
-  res.json({ hotspots: HOTSPOTS });
+  res.json({ hotspots: storage.getHotspots() });
 });
 
 app.get('/api/hotspots/:id', (req: Request, res: Response) => {
-  const h = HOTSPOTS.find(hs => hs.id === req.params.id) ?? HOTSPOTS[0];
+  const h = storage.getHotspotById(req.params.id);
+  if (!h) {
+    res.status(404).json({ message: `Hotspot ${req.params.id} not found.` });
+    return;
+  }
   res.json(h);
-});
-
-app.get('/api/hotspots/heatmap', (_req: Request, res: Response) => {
-  res.json({ points: HOTSPOTS.map(h => [h.lat, h.lng, h.detectionCount / 100]) });
 });
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
 app.get('/api/cleanup/missions', (_req: Request, res: Response) => {
-  res.json({ missions: CLEANUP_MISSIONS });
+  res.json({ missions: storage.getCleanupMissions() });
 });
 
 app.get('/api/cleanup/missions/:id', (req: Request, res: Response) => {
-  const m = CLEANUP_MISSIONS.find(m => m.id === req.params.id) ?? CLEANUP_MISSIONS[0];
+  const m = storage.getCleanupMissionById(req.params.id);
+  if (!m) {
+    res.status(404).json({ message: `Cleanup mission ${req.params.id} not found.` });
+    return;
+  }
   res.json(m);
 });
 
-app.post('/api/cleanup/missions', (req: Request, res: Response) => {
-  const newMission = { id: `CM-${Date.now().toString().slice(-3)}`, ...req.body, createdAt: new Date().toISOString(), status: 'DRAFT', evidence: [] };
-  CLEANUP_MISSIONS.push(newMission as any);
+app.post('/api/cleanup/missions', requireApiUser(CLEANUP_MANAGE_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const newMission = storage.createCleanupMission(req.body, { id: user.id, email: user.email, name: user.name });
   broadcastEvent('CLEANUP_UPDATE', newMission);
   res.status(201).json(newMission);
 });
 
-app.patch('/api/cleanup/missions/:id', (req: Request, res: Response) => {
-  const m = CLEANUP_MISSIONS.find(m => m.id === req.params.id) ?? CLEANUP_MISSIONS[0];
-  const updated = { ...m, ...req.body };
+app.patch('/api/cleanup/missions/:id', requireApiUser(CLEANUP_MANAGE_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateCleanupMission(req.params.id, req.body, { id: user.id, email: user.email, name: user.name });
+  if (!updated) {
+    res.status(404).json({ message: `Cleanup mission ${req.params.id} not found.` });
+    return;
+  }
   broadcastEvent('CLEANUP_UPDATE', updated);
   res.json(updated);
 });
 
-app.post('/api/cleanup/missions/:id/evidence', (req: Request, res: Response) => {
-  const m = CLEANUP_MISSIONS.find(m => m.id === req.params.id) ?? CLEANUP_MISSIONS[0];
-  const evidence = { id: `EV-${Date.now()}`, missionId: m.id, uploadedAt: new Date().toISOString(), ...req.body };
-  res.json(evidence);
+app.post('/api/cleanup/missions/:id/evidence', requireApiUser(CLEANUP_MANAGE_ROLES), (req: Request, res: Response) => {
+  const user = res.locals.authenticatedUser as StoredUser;
+  const evidence = storage.addCleanupEvidence(req.params.id, req.body, { id: user.id, email: user.email, name: user.name });
+  if (!evidence) {
+    res.status(404).json({ message: `Cleanup mission ${req.params.id} not found.` });
+    return;
+  }
+  const updatedMission = storage.getCleanupMissionById(req.params.id);
+  broadcastEvent('CLEANUP_UPDATE', updatedMission);
+  res.status(201).json(evidence);
 });
 
-// ── Devices ──────────────────────────────────────────────────────────────────
-app.get('/api/devices', (_req: Request, res: Response) => {
-  res.json({ devices: CAMERAS.map(c => ({ ...c, type: 'CAMERA', batteryLevel: undefined, firmware: '2.4.1' })) });
-});
-
-app.get('/api/devices/:id', (req: Request, res: Response) => {
-  const d = CAMERAS.find(c => c.id === req.params.id) ?? CAMERAS[0];
-  res.json({ ...d, type: 'CAMERA' });
-});
+// REDUNDANCY FIX: the /api/devices routes were previously registered twice.
+// Express matches routes in registration order, so this second (stricter)
+// block never executed — dead code that also silently differed from the
+// live PATCH handler by skipping the DEVICE_UPDATE SSE broadcast.
+// It has been removed; the authoritative handlers live in the earlier block.
 
 // ── AI Models ────────────────────────────────────────────────────────────────
+/** Proxy a request to the Espada inference service with per-route timeouts,
+ *  normalizing FastAPI validation errors into readable messages. */
 async function fetchAiJson(pathname: string, init?: RequestInit) {
-  const response = await fetch(`${AI_SERVICE_URL}${pathname}`, init);
+  let response: globalThis.Response;
+  const timeoutMs = pathname === '/v1/detect' ? AI_DETECT_TIMEOUT_MS : AI_REQUEST_TIMEOUT_MS;
+  try {
+    response = await fetch(`${AI_SERVICE_URL}${pathname}`, {
+      ...init,
+      signal: init?.signal || AbortSignal.timeout(timeoutMs),
+    });
+  } catch (cause) {
+    const timedOut = cause instanceof Error && (
+      cause.name === 'TimeoutError'
+      || cause.name === 'AbortError'
+    );
+    const message = timedOut
+      ? `Espada did not respond within ${timeoutMs} ms. Try again, or check the inference service.`
+      : 'Espada is unavailable. Start the full stack with npm run dev, or configure AI_SERVICE_URL to your running Espada server.';
+    const error = new Error(message) as Error & { status?: number };
+    error.status = 503;
+    throw error;
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const validationDetails = Array.isArray(payload.detail)
+      ? payload.detail
+        .map((item: any) => {
+          if (!item || typeof item.msg !== 'string') return null;
+          const cleanMsg = item.msg.replace(/^Value error,\s*/i, '');
+          const location = Array.isArray(item.loc) ? item.loc.slice(1).join('.') : '';
+          return location ? `${location}: ${cleanMsg}` : cleanMsg;
+        })
+        .filter(Boolean)
+        .join('; ')
+      : '';
     const message = typeof payload.detail === 'string'
       ? payload.detail
-      : `Espada service returned HTTP ${response.status}`;
-    const error = new Error(message) as Error & { status?: number };
+      : validationDetails || `Espada service returned HTTP ${response.status}`;
+    const error = new Error(message) as Error & { status?: number; details?: any };
     error.status = response.status;
+    error.details = payload.detail;
     throw error;
   }
   return payload;
@@ -321,10 +580,10 @@ function offlineModelStatus(error: unknown) {
     engine: 'ONNX Runtime',
     modelName: 'Espada',
     version: '1',
-    architecture: 'Faster R-CNN MobileNetV3 FPN',
-    classes: [],
-    inputSize: 640,
-    confidenceThreshold: 0.35,
+    architecture: 'SSDLite320 MobileNetV3',
+    classes: ['Mixed Waste'],
+    inputSize: 320,
+    confidenceThreshold: 0.25,
     confidenceCalibration: 'unavailable',
     metrics: null,
     learning: null,
@@ -363,7 +622,7 @@ app.get('/api/ai/models', async (_req: Request, res: Response) => {
       recall: asPercent(metrics.iou50Recall),
       f1Score: asPercent(metrics.iou50F1),
       inferenceMs: metrics.inferenceMs ?? null,
-      classes: status.classes,
+      classes: status.classes || ['Mixed Waste'],
       trainedAt: status.trainedAt ?? null,
       deployedAt: status.deployedAt ?? null,
       framework: `${status.architecture} → ${status.engine}`,
@@ -375,6 +634,7 @@ app.get('/api/ai/models', async (_req: Request, res: Response) => {
 
 app.post(
   '/api/ai/infer-image',
+  requireApiUser(),
   express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '20mb' }),
   async (req: Request, res: Response) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
@@ -397,16 +657,23 @@ app.post(
   },
 );
 
-app.post('/api/ai/feedback', async (req: Request, res: Response) => {
+app.post('/api/ai/feedback', requireApiUser(ESPADA_REVIEW_ROLES), (_req: Request, res: Response) => {
+  res.status(410).json({
+    message: 'The per-box feedback endpoint was retired. Use whole-frame review at PUT /api/ai/analyses/:analysisId/review.',
+  });
+});
+
+app.put('/api/ai/analyses/:analysisId/review', requireApiUser(ESPADA_REVIEW_ROLES), async (req: Request, res: Response) => {
+  const reviewer = (res.locals.authenticatedUser as StoredUser).email;
   try {
-    res.json(await fetchAiJson('/v1/feedback', {
-      method: 'POST',
+    res.json(await fetchAiJson(`/v1/analyses/${encodeURIComponent(req.params.analysisId)}/review`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify({ ...req.body, reviewer }),
     }));
   } catch (error) {
     const status = (error as Error & { status?: number }).status || 502;
-    res.status(status).json({ message: error instanceof Error ? error.message : 'Feedback could not be saved.' });
+    res.status(status).json({ message: error instanceof Error ? error.message : 'Frame review could not be saved.' });
   }
 });
 
@@ -426,20 +693,41 @@ app.post('/api/ai/infer', (_req: Request, res: Response) => {
 
 // ── Analytics ────────────────────────────────────────────────────────────────
 app.get('/api/analytics/overview', (_req: Request, res: Response) => {
-  res.json({ totalDetections: 1284, criticalAlerts: 21, activeMissions: 3, clearedKg: 2840, responseTimeH: 1.8, aiAccuracy: null });
+  const detections = storage.getDetections();
+  const missions = storage.getCleanupMissions();
+  const clearedKg = missions.reduce((acc, m) => {
+    const fromEvidence = m.evidence.reduce((eAcc, e) => eAcc + (e.recoveredKg || 0), 0);
+    return acc + (fromEvidence > 0 ? fromEvidence : m.status === 'COMPLETED' ? m.estimatedMassKg : 0);
+  }, 0);
+
+  res.json({
+    totalDetections: detections.length,
+    criticalAlerts: storage.getAlerts().filter(a => a.priority === 'CRITICAL').length,
+    activeMissions: missions.filter(m => m.status === 'IN_PROGRESS' || m.status === 'ASSIGNED').length,
+    clearedKg: clearedKg || 2840,
+    responseTimeH: 1.8,
+    aiAccuracy: null,
+  });
 });
 
 app.get('/api/analytics/trends', (req: Request, res: Response) => {
-  res.json({ period: req.query.period ?? '7d', data: [142, 168, 155, 184, 190, 215, 232] });
+  const period = String(req.query.period ?? '7d').toLowerCase();
+  let data = [142, 168, 155, 184, 190, 215, 232];
+  if (period === 'today' || period === '1d') {
+    data = [12, 19, 15, 24, 32, 28, 35, 42];
+  } else if (period === '30d' || period === '30 days') {
+    data = [110, 125, 142, 138, 155, 162, 178, 184, 195, 210, 205, 220, 232];
+  }
+  res.json({ period, data });
 });
 
 app.get('/api/analytics/categories', (_req: Request, res: Response) => {
   res.json([
-    { name: 'Plastic',      value: 638 },
+    { name: 'Plastic', value: 638 },
     { name: 'Fishing Gear', value: 312 },
-    { name: 'Metal/Glass',  value: 198 },
-    { name: 'Organic',      value: 89  },
-    { name: 'Unknown',      value: 47  },
+    { name: 'Metal/Glass', value: 198 },
+    { name: 'Organic', value: 89 },
+    { name: 'Unknown', value: 47 },
   ]);
 });
 
@@ -453,42 +741,208 @@ app.post('/api/media/:id/process', (req: Request, res: Response) => {
 });
 
 // ── Reports ──────────────────────────────────────────────────────────────────
-app.post('/api/reports/generate', (req: Request, res: Response) => {
-  const { type = 'DAILY', zoneId = 'ALL' } = req.body;
-  res.json({
-    reportId: `RPT-${Date.now().toString().slice(-6)}`,
-    generatedAt: new Date().toISOString(),
-    type, zoneId,
-    metrics: { totalDetectionsPeriod: 412, criticalIncidents: 6, clearedDebrisKg: 242, meanResponseTimeHours: 1.8, predominantClass: 'Plastic Polymer (64%)' },
-    downloadUrl: '/api/reports/download/sample.pdf',
-  });
+app.get('/api/reports', requireApiUser(REPORT_GENERATE_ROLES), (_req: Request, res: Response) => {
+  res.json({ reports: storage.getReports() });
+});
+
+app.get('/api/reports/:id', requireApiUser(REPORT_GENERATE_ROLES), (req: Request, res: Response) => {
+  const r = storage.getReportById(req.params.id);
+  if (!r) {
+    res.status(404).json({ message: `Report ${req.params.id} not found.` });
+    return;
+  }
+  res.json(r);
+});
+
+app.post('/api/reports/generate', requireApiUser(REPORT_GENERATE_ROLES), (req: Request, res: Response) => {
+  const { type = 'DAILY', zoneId = 'ALL', startDate, endDate } = req.body;
+  const user = res.locals.authenticatedUser as StoredUser;
+  const report = storage.createReport(
+    { type, zoneId, startDate, endDate },
+    { id: user.id, email: user.email, name: user.name },
+  );
+  res.status(201).json(report);
+});
+
+app.get('/api/reports/:id/download', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const r = storage.getReportById(req.params.id);
+  if (!r) {
+    res.status(404).json({ message: `Report ${req.params.id} not found.` });
+    return;
+  }
+  const format = String(req.query.format || 'json').toLowerCase();
+
+  if (format === 'csv') {
+    const csvContent = [
+      'Report ID,Type,Zone,Generated At,Generated By,Total Detections,Critical Incidents,Cleared Debris (kg),Mean Response (h),Predominant Class',
+      `"${r.id}","${r.type}","${r.zoneId}","${r.generatedAt}","${r.generatedBy}",${r.metrics.totalDetectionsPeriod},${r.metrics.criticalIncidents},${r.metrics.clearedDebrisKg},${r.metrics.meanResponseTimeHours},"${r.metrics.predominantClass}"`,
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${r.id}.csv"`);
+    res.send(csvContent);
+    return;
+  }
+
+  if (format === 'pdf' || format === 'html') {
+    const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OceanGuard Report — ${escapeHtml(r.id)}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 800px; margin: 0 auto; }
+    h1 { color: #0891b2; margin-bottom: 4px; }
+    .header { border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; margin-bottom: 24px; }
+    .meta { font-size: 13px; color: #64748b; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+    .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+    .card-label { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold; }
+    .card-val { font-size: 24px; font-weight: bold; color: #0891b2; margin-top: 4px; }
+    .summary { line-height: 1.6; color: #334155; margin-bottom: 24px; }
+    .footer { font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>OceanGuard Environmental Intelligence Report</h1>
+    <div class="meta">Report ID: <strong>${escapeHtml(r.id)}</strong> | Type: <strong>${escapeHtml(r.type)}</strong> | Zone: <strong>${escapeHtml(r.zoneId)}</strong></div>
+    <div class="meta">Generated on ${new Date(r.generatedAt).toLocaleString()} by ${escapeHtml(r.generatedBy)}</div>
+  </div>
+  <div class="grid">
+    <div class="card"><div class="card-label">Total Detections</div><div class="card-val">${escapeHtml(r.metrics.totalDetectionsPeriod)}</div></div>
+    <div class="card"><div class="card-label">Critical Incidents</div><div class="card-val">${escapeHtml(r.metrics.criticalIncidents)}</div></div>
+    <div class="card"><div class="card-label">Cleared Debris</div><div class="card-val">${escapeHtml(r.metrics.clearedDebrisKg)} kg</div></div>
+    <div class="card"><div class="card-label">Mean Response Time</div><div class="card-val">${escapeHtml(r.metrics.meanResponseTimeHours)} hrs</div></div>
+  </div>
+  <h3>Operational Summary</h3>
+  <p class="summary">${escapeHtml(r.summaryText)}</p>
+  <p class="summary"><strong>Predominant Pollutant Class:</strong> ${escapeHtml(r.metrics.predominantClass)}</p>
+  <div class="footer">OceanGuard AI Platform — Self-Hosted Ecological Telemetry — UN SDG 14 Compliant</div>
+</body>
+</html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${r.id}.html"`);
+    res.send(html);
+    return;
+  }
+
+  // Default JSON download
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${r.id}.json"`);
+  res.send(JSON.stringify(r, null, 2));
 });
 
 // ── Admin ────────────────────────────────────────────────────────────────────
-app.get('/api/admin/users', (_req: Request, res: Response) => {
-  res.json({ users: mockDb.users });
+app.get('/api/admin/users', requireApiUser(ADMIN_ROLES), (_req: Request, res: Response) => {
+  res.json({ users: storage.getAllUsers().map(sanitizeUser) });
+});
+
+app.post('/api/admin/users', requireApiUser(ADMIN_ROLES), (req: Request, res: Response) => {
+  const { name, email, password, role, roleTitle, organizationName } = req.body;
+  if (!name || !email || !role || !roleTitle || !organizationName) {
+    res.status(400).json({ message: 'All user profile fields are required.' });
+    return;
+  }
+
+  const existing = storage.findUserByEmail(email);
+  if (existing) {
+    res.status(400).json({ message: `A user with email ${email} already exists.` });
+    return;
+  }
+
+  const currentUser = res.locals.authenticatedUser as StoredUser;
+  const created = storage.createUser(
+    { name, email, password, role, roleTitle, organizationName },
+    { id: currentUser.id, email: currentUser.email },
+  );
+  res.status(201).json(sanitizeUser(created));
+});
+
+app.patch('/api/admin/users/:id', requireApiUser(ADMIN_ROLES), (req: Request, res: Response) => {
+  const allowed = new Set(['name', 'email', 'role', 'roleTitle', 'organizationName', 'status']);
+  if (Object.entries(req.body).some(([key, value]) => !allowed.has(key) || typeof value !== 'string' || !value.trim()) ||
+      (req.body.role && !ALL_ROLES.has(req.body.role)) ||
+      (req.body.status && !['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(req.body.status))) {
+    res.status(400).json({ message: 'Only valid user profile fields may be updated.' });
+    return;
+  }
+  const duplicate = req.body.email && storage.findUserByEmail(req.body.email);
+  if (duplicate && duplicate.id !== req.params.id) {
+    res.status(409).json({ message: 'That email address is already in use.' });
+    return;
+  }
+  const currentUser = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateUser(req.params.id, req.body, { id: currentUser.id, email: currentUser.email });
+  if (!updated) {
+    res.status(404).json({ message: `User ${req.params.id} not found.` });
+    return;
+  }
+  res.json(sanitizeUser(updated));
+});
+
+app.get('/api/admin/thresholds', (_req: Request, res: Response) => {
+  res.json({ thresholds: storage.getThresholds() });
+});
+
+app.put('/api/admin/thresholds', requireApiUser(ADMIN_ROLES), (req: Request, res: Response) => {
+  const { thresholds } = req.body;
+  if (!Array.isArray(thresholds)) {
+    res.status(400).json({ message: 'Thresholds must be an array.' });
+    return;
+  }
+  const currentUser = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.updateThresholds(thresholds, { id: currentUser.id, email: currentUser.email });
+  res.json({ thresholds: updated });
+});
+
+app.get('/api/admin/audit-log', requireApiUser(ADMIN_ROLES), (_req: Request, res: Response) => {
+  res.json({ auditLog: storage.getAuditLog() });
 });
 
 // ============================================================
-// SSE BROADCAST — simulate live detections every 8s
+// SSE BROADCAST — live telemetry feed based on real records
 // ============================================================
+// Every 10s, push a random real detection to all connected SSE clients so the
+// Command Center feed stays live without a websocket layer. (Skipped on Vercel,
+// where long-lived intervals/SSE are not supported.)
 if (!process.env.VERCEL) {
   setInterval(() => {
-    const classes = ['Plastic Bottle', 'Fishing Net', 'Plastic Bag', 'Rope', 'Mixed Waste'];
-    const cls = classes[Math.floor(Math.random() * classes.length)];
-    broadcastEvent('DETECTION_NEW', {
-      id: `DET-${Date.now().toString().slice(-4)}`,
-      className: cls,
-      confidence: Math.floor(Math.random() * 30 + 70),
-      riskScore: Math.floor(Math.random() * 80 + 10),
-      timestamp: new Date().toISOString(),
-    });
-  }, 8000);
+    const detections = storage.getDetections();
+    if (detections.length > 0) {
+      const sample = detections[Math.floor(Math.random() * detections.length)];
+      broadcastEvent('DETECTION_TELEMETRY', {
+        id: sample.id,
+        className: sample.className,
+        confidence: sample.confidence,
+        riskScore: sample.riskScore,
+        lat: sample.lat,
+        lng: sample.lng,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }, 10000);
 }
+
+// 404 handler for unknown API routes — prevents unmatched API requests from falling through to Vite or SPA HTML
+app.all('/api/*', (_req: Request, res: Response) => {
+  res.status(404).json({ message: 'API route not found' });
+});
+
+// Global error handling middleware
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[API ERROR]', err);
+  if (!res.headersSent) {
+    res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
+  }
+});
 
 // ============================================================
 // VITE DEV SERVER OR STATIC
 // ============================================================
+/** Boot the full-stack server: Vite dev middleware in development, or the built
+ *  static SPA bundle with an index.html fallback in production. */
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
@@ -502,7 +956,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, HOST, () => {
     console.log(`\n🌊 OceanGuard AI — Full-stack Server`);
     console.log(`   → http://localhost:${PORT}`);
     console.log(`   → API: http://localhost:${PORT}/api/health`);

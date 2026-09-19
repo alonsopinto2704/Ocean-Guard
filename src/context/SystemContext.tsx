@@ -1,8 +1,9 @@
-import React, {
+import {
   createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode
 } from 'react';
 import { dashboardApi } from '../lib/api';
 import type { DashboardSummary, SystemHealth, SSEEvent } from '../types';
+import { useAuth } from './AuthContext';
 
 interface SystemContextValue {
   summary: DashboardSummary | null;
@@ -16,33 +17,12 @@ interface SystemContextValue {
 
 const SystemContext = createContext<SystemContextValue | null>(null);
 
-const DEFAULT_SUMMARY: DashboardSummary = {
-  debrisDetected: 1284,
-  highRiskIncidents: 21,
-  activeHotspots: 18,
-  activeAlerts: 7,
-  cleanupMissions: 3,
-  camerasOnline: '14/15',
-  systemStatus: 'ONLINE',
-  aiStatus: 'MODEL_ERROR',
-};
-
-const DEFAULT_HEALTH: SystemHealth = {
-  system: 'ONLINE',
-  camera: 'STREAMING',
-  ai: 'MODEL_ERROR',
-  gps: 'VALID',
-  internet: 'ONLINE',
-  activeCameras: 14,
-  totalCameras: 15,
-  aiLatencyMs: 0,
-  fps: 29.8,
-  uptime: '99.7%',
-};
-
+/** Global telemetry provider: polls dashboard summary + system health every 30s
+ *  and maintains one SSE connection for live events. */
 export function SystemProvider({ children }: { children: ReactNode }) {
-  const [summary, setSummary] = useState<DashboardSummary | null>(DEFAULT_SUMMARY);
-  const [health, setHealth]   = useState<SystemHealth | null>(DEFAULT_HEALTH);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [health, setHealth]   = useState<SystemHealth | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [lastEvent, setLastEvent] = useState<SSEEvent | null>(null);
   const [lastEventTime, setLastEventTime] = useState<string | null>(null);
@@ -53,19 +33,24 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       const data = await dashboardApi.summary();
       setSummary(data);
       setIsOnline(true);
-    } catch { /* keep last value */ }
+    } catch {
+      setIsOnline(false);
+    }
   }, []);
 
   const refreshHealth = useCallback(async () => {
     try {
       const data = await dashboardApi.systemHealth();
       setHealth(data);
-    } catch { /* keep last value */ }
+    } catch {
+      setIsOnline(false);
+    }
   }, []);
 
   // SSE connection
   useEffect(() => {
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    if (authLoading || !isAuthenticated) return;
+
     let disposed = false;
 
     const connect = () => {
@@ -83,10 +68,10 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       };
 
       es.onerror = () => {
-        setIsOnline(false);
-        es.close();
-        // Reconnect after 5s
-        reconnectTimer = setTimeout(connect, 5000);
+        // EventSource retries transient failures natively. A 204 response (used
+        // by Vercel where SSE is unsupported) transitions to CLOSED; leave it
+        // closed and let polling continue to own the online status.
+        if (es.readyState === EventSource.CLOSED) esRef.current = null;
       };
     };
 
@@ -94,12 +79,13 @@ export function SystemProvider({ children }: { children: ReactNode }) {
     return () => {
       disposed = true;
       esRef.current?.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
     };
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   // Poll summary + health every 30s
   useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+
     refreshSummary();
     refreshHealth();
     const id = setInterval(() => {
@@ -107,7 +93,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       refreshHealth();
     }, 30000);
     return () => clearInterval(id);
-  }, [refreshSummary, refreshHealth]);
+  }, [authLoading, isAuthenticated, refreshSummary, refreshHealth]);
 
   return (
     <SystemContext.Provider value={{ summary, health, isOnline, lastEvent, lastEventTime, refreshSummary, refreshHealth }}>
@@ -116,6 +102,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Access system telemetry; throws if used outside <SystemProvider>. */
 export function useSystem(): SystemContextValue {
   const ctx = useContext(SystemContext);
   if (!ctx) throw new Error('useSystem must be used within SystemProvider');
