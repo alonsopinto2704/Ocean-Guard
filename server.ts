@@ -1,6 +1,6 @@
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
-import { storage, StoredUser } from './src/server/storage';
+import { storage, StoredUser } from './src/server/storage.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
