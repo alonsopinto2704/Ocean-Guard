@@ -956,7 +956,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`\n🌊 OceanGuard AI — Full-stack Server`);
     console.log(`   → http://localhost:${PORT}`);
     console.log(`   → API: http://localhost:${PORT}/api/health`);
@@ -966,6 +966,15 @@ async function startServer() {
     console.log(`   officer@oceanguard.ai  — Environmental Officer`);
     console.log(`   cleanup@oceanguard.ai  — Cleanup Team`);
     console.log(`   Password: demo1234\n`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ Error: Port ${PORT} is already in use by another application.`);
+      console.error(`   Free up port ${PORT} or specify a different port with: PORT=${PORT + 1} npm run dev\n`);
+    } else {
+      console.error('\n❌ Server error:', err);
+    }
   });
 }
 
