@@ -646,7 +646,7 @@ app.post(
     try { filename = decodeURIComponent(filename); } catch { /* Keep safe raw value. */ }
     const contentType = String(req.headers['content-type'] || 'image/jpeg');
     const form = new FormData();
-    form.append('file', new Blob([req.body], { type: contentType }), filename);
+    form.append('file', new Blob([req.body as any], { type: contentType }), filename);
 
     try {
       res.json(await fetchAiJson('/v1/detect', { method: 'POST', body: form }));
