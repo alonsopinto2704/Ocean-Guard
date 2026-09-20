@@ -11,6 +11,7 @@ datasets/
 training_runs/
 ai_service/data/
 ai_service/models/*.onnx
+!ai_service/models/espada-v1.onnx
 ai_service/models/releases/
 ai_service/models/current.json
 ai_service/models/.candidate-*/

@@ -26,7 +26,7 @@ async function request<T>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message || `HTTP ${res.status}`);
+    throw new Error(err.message || 'The request could not be completed. Please try again.');
   }
   return res.json() as Promise<T>;
 }
@@ -167,7 +167,7 @@ export const aiApi = {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new Error(error.message || 'Espada could not analyze this image. Please try again.');
     }
     return response.json() as Promise<AIInferenceResult>;
   },
@@ -205,7 +205,7 @@ export const reportsApi = {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new Error(error.message || 'We could not save this review. Your changes are still here—please try again.');
     }
     return response;
   },

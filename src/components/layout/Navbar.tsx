@@ -58,7 +58,7 @@ export function Navbar({ title, subtitle, sampleMission = false, navigationOpen 
             Neural Confidence
           </span>
           <span className="font-data-mono-sm text-[11px] font-bold text-[#00f5d4]">
-            ESPADA V1 · LIVE STATUS
+            ESPADA V1 · {health?.ai === 'RUNNING' ? 'ONLINE' : 'UNAVAILABLE'}
           </span>
         </div>
         <div className="h-6 w-px bg-[#3a4a46]/50" />
@@ -76,7 +76,7 @@ export function Navbar({ title, subtitle, sampleMission = false, navigationOpen 
             Inference Engine
           </span>
           <span className="font-data-mono-sm text-[11px] font-bold text-[#dde2f3]">
-            {health?.aiLatencyMs ? `${health.aiLatencyMs.toFixed(0)}MS` : health?.ai === 'RUNNING' ? 'ACTIVE' : 'STANDBY'} · {summary?.systemStatus ?? 'ONLINE'}
+            {health?.aiLatencyMs ? `${health.aiLatencyMs.toFixed(0)}MS` : health?.ai === 'RUNNING' ? 'ACTIVE' : 'STANDBY'} · {summary?.systemStatus ?? 'CHECKING'}
           </span>
         </div>
       </div>}

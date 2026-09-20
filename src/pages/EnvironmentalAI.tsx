@@ -144,19 +144,19 @@ export default function EnvironmentalAI() {
   }, [period, startDate, endDate]);
 
   const metrics = modelStatus?.metrics;
-  const precision = metrics?.iou50Precision != null ? `${(metrics.iou50Precision <= 1 ? metrics.iou50Precision * 100 : metrics.iou50Precision).toFixed(1)}%` : '35.3%';
-  const recall = metrics?.iou50Recall != null ? `${(metrics.iou50Recall <= 1 ? metrics.iou50Recall * 100 : metrics.iou50Recall).toFixed(1)}%` : '23.1%';
-  const f1Score = metrics?.iou50F1 != null ? `${(metrics.iou50F1 <= 1 ? metrics.iou50F1 * 100 : metrics.iou50F1).toFixed(1)}%` : '28.0%';
-  const latency = metrics?.inferenceMs != null ? `${metrics.inferenceMs.toFixed(0)} ms` : '18 ms';
+  const precision = metrics?.iou50Precision != null ? `${(metrics.iou50Precision <= 1 ? metrics.iou50Precision * 100 : metrics.iou50Precision).toFixed(1)}%` : '—';
+  const recall = metrics?.iou50Recall != null ? `${(metrics.iou50Recall <= 1 ? metrics.iou50Recall * 100 : metrics.iou50Recall).toFixed(1)}%` : '—';
+  const f1Score = metrics?.iou50F1 != null ? `${(metrics.iou50F1 <= 1 ? metrics.iou50F1 * 100 : metrics.iou50F1).toFixed(1)}%` : '—';
+  const latency = metrics?.inferenceMs != null ? `${metrics.inferenceMs.toFixed(0)} ms` : '—';
 
   return (
     <div className="p-3 space-y-6 sm:p-6">
       {/* Provenance Notice */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-lg border border-[#00f5d4]/30 bg-[#00f5d4]/10">
         <div className="flex items-center gap-2.5">
-          <DataProvenanceBadge status="LIVE" label="OPERATIONAL TELEMETRY" />
+          <DataProvenanceBadge status="SAMPLE" label="DEMONSTRATION DATA" />
           <p className="text-xs text-[var(--ocean-text-dim)]">
-            Aggregated from verified sensor detections, drone sweeps, and certified cleanup manifests across coastal monitoring sectors.
+            Illustrative coastal monitoring data for exploring the analytics workflow. It is not a live operational feed.
           </p>
         </div>
         <span className="text-[10px] font-mono text-cyan-300">FILTER ACTIVE: {period.toUpperCase()}</span>
@@ -167,7 +167,7 @@ export default function EnvironmentalAI() {
         <StatCard label="Detections in Period" value={currentDataset.totals.detections.toLocaleString()} color="#00d4ff" icon={<Target className="w-5 h-5" />} subvalue={`${period} window`} />
         {/* BUGFIX: previously hardcoded 'SSDLite320' whenever the service replied;
             show the architecture the service actually reports, with a neutral fallback. */}
-        <StatCard label="Espada Architecture" value={modelStatus?.architecture ?? 'PILOT v1'} color="#00ff88" icon={<Brain className="w-5 h-5" />} subvalue="Self-hosted ONNX" />
+        <StatCard label="Espada Architecture" value={modelStatus?.ready ? modelStatus.architecture : 'Unavailable'} color="#00ff88" icon={<Brain className="w-5 h-5" />} subvalue={modelStatus?.ready ? modelStatus.engine : 'Model offline'} />
         <StatCard label="Mean Response Time" value={`${currentDataset.totals.responseTimeH}h`} color="#ffaa00" icon={<Zap className="w-5 h-5" />} subvalue="Dispatch to recovery" />
         <StatCard label="Recovered Pollutants" value={`${currentDataset.totals.clearedKg.toLocaleString()} kg`} color="#aa55ff" icon={<Activity className="w-5 h-5" />} subvalue="Certified haul logs" />
       </div>
@@ -248,7 +248,7 @@ export default function EnvironmentalAI() {
         <Card noPad>
           <CardHeader
             title="Espada Model Intelligence"
-            subtitle="Verified validation metrics"
+            subtitle={modelStatus?.ready ? 'Verified validation metrics' : 'Live model metrics are temporarily unavailable'}
             icon={<Brain className="w-4 h-4" />}
             action={<DataProvenanceBadge status={modelStatus?.ready ? 'LIVE' : 'SAMPLE'} label={modelStatus?.ready ? 'ONLINE' : 'MODEL'} />}
             className="px-4 pt-4"

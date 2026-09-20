@@ -58,7 +58,7 @@ function SystemHealthPanel() {
 // Command Center dashboard: KPI cards, live trend/pie charts, alert feed,
 // recent detections, subsystem health, and the alert-management modal.
 export default function CommandCenter() {
-  const { summary, lastEvent } = useSystem();
+  const { summary, health, isOnline, lastEvent } = useSystem();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [trends, setTrends] = useState<any[]>([]);
@@ -436,15 +436,17 @@ export default function CommandCenter() {
             icon={<Shield className="w-4 h-4 text-emerald-400" />}
           />
           <SystemHealthPanel />
-          <div className="mt-4 rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-3">
+          <div className="mt-4 rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-3" role="status" aria-live="polite">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="text-xs font-semibold text-emerald-400">
-                All 7 Coastal India Sectors Synchronized
+              <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <span className={`text-xs font-semibold ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {isOnline ? 'Coastal telemetry connected' : 'Telemetry temporarily unavailable'}
               </span>
             </div>
             <p className="text-[10px] text-[var(--ocean-text-dim)] mt-1">
-              Espada v1 · ONNX marine inference runtime · Live WebSocket/SSE event bus
+              {health?.ai === 'RUNNING'
+                ? 'Espada v1 · image analysis online'
+                : 'Espada v1 · image analysis temporarily unavailable'}
             </p>
           </div>
         </Card>

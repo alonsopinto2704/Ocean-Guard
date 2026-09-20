@@ -302,7 +302,7 @@ export default function Hotspots() {
         {/* Tile warning banner if remote basemap failed */}
         {tileError && (
           <div className="absolute top-16 left-4 z-[1000] p-2.5 rounded-lg border border-amber-500/30 bg-[#0c1322]/95 backdrop-blur-md text-xs text-amber-300 flex items-center gap-2">
-            <span>External map tile server is rate-limited. Vectors and clustering remain active.</span>
+            <span>The map background couldn’t load. Location markers are still available.</span>
             <button
               onClick={() => changeBasemap('english')}
               className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200"

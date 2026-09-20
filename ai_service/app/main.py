@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import math
+import hmac
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
 from starlette.concurrency import run_in_threadpool
@@ -13,7 +15,7 @@ from .learning import LearningStore, MAX_FRAME_ANNOTATIONS, RevisionConflictErro
 from .model import MarineDebrisDetector, ModelNotReadyError
 
 
-MAX_IMAGE_BYTES = int(os.getenv("OCEANGUARD_MAX_IMAGE_BYTES", str(20 * 1024 * 1024)))
+MAX_IMAGE_BYTES = int(os.getenv("OCEANGUARD_MAX_IMAGE_BYTES", str(4 * 1024 * 1024)))
 detector = MarineDebrisDetector()
 learning_store = LearningStore()
 
@@ -101,6 +103,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def require_service_token(request: Request, call_next):
+    expected = os.getenv("ESPADA_SERVICE_TOKEN", "")
+    if expected and request.url.path.startswith("/v1/"):
+        supplied = request.headers.get("x-espada-service-token", "")
+        if not hmac.compare_digest(supplied, expected):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
+
 @app.get("/health")
 def health() -> dict:
     return detector.status()
@@ -123,7 +135,7 @@ async def detect(file: UploadFile = File(...)) -> dict:
 
     image_bytes = await file.read(MAX_IMAGE_BYTES + 1)
     if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image exceeds the 20 MB limit.")
+        raise HTTPException(status_code=413, detail="Image exceeds the upload limit.")
 
     try:
         result = await run_in_threadpool(detector.predict, image_bytes, file.filename or "upload")

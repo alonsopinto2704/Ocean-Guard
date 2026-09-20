@@ -128,6 +128,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             gateway_port = _free_port()
             ai_url = f"http://127.0.0.1:{ai_port}"
             gateway_url = f"http://127.0.0.1:{gateway_port}"
+            service_token = "integration-test-service-token"
 
             ai_environment = {
                 **os.environ,
@@ -137,6 +138,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "OCEANGUARD_METADATA_PATH": str(metadata_path),
                 "OCEANGUARD_MAX_IMAGE_BYTES": "4096",
                 "ESPADA_BOOTSTRAP_ENABLED": "true",
+                "ESPADA_SERVICE_TOKEN": service_token,
             }
             gateway_environment = {
                 **os.environ,
@@ -146,6 +148,8 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "AI_SERVICE_URL": ai_url,
                 "AI_SERVICE_DETECT_TIMEOUT_MS": "1000",
                 "AI_SERVICE_REQUEST_TIMEOUT_MS": "1000",
+                "ESPADA_SERVICE_TOKEN": service_token,
+                "OCEANGUARD_SESSION_SECRET": "integration-test-session-secret",
             }
 
             try:
@@ -375,7 +379,12 @@ class GatewayIntegrationTests(unittest.TestCase):
                     headers={"Content-Type": "image/png", **operator_auth},
                 )
                 self.assertEqual(status, 503)
-                self.assertIn("Espada is unavailable", offline["message"])
+                self.assertEqual(
+                    offline["message"],
+                    "Espada is temporarily unavailable. Image analysis is paused. Please try again shortly.",
+                )
+                self.assertNotIn("AI_SERVICE_URL", offline["message"])
+                self.assertNotIn("npm run", offline["message"])
 
                 delayed_server = ThreadingHTTPServer(("127.0.0.1", ai_port), _DelayedEspadaHandler)
                 delayed_thread = threading.Thread(target=delayed_server.serve_forever, daemon=True)
@@ -390,7 +399,11 @@ class GatewayIntegrationTests(unittest.TestCase):
                 )
                 elapsed = time.monotonic() - started
                 self.assertEqual(status, 503)
-                self.assertIn("did not respond within 1000 ms", timed_out["message"])
+                self.assertEqual(
+                    timed_out["message"],
+                    "Espada is temporarily unavailable. Image analysis is paused. Please try again shortly.",
+                )
+                self.assertNotIn("1000 ms", timed_out["message"])
                 self.assertLess(elapsed, 4)
 
                 self.assertEqual(_storage_snapshot(OPERATIONAL_DATA), operational_before)

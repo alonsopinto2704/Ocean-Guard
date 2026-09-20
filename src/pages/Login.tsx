@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
-import { Activity, Eye, EyeOff, KeyRound, Map, Rocket, Satellite, Target, Waves, CheckCircle2 } from 'lucide-react';
+import { Activity, Eye, EyeOff, KeyRound, Map, Rocket, Satellite, Target, Waves } from 'lucide-react';
 import { SkipLink } from '../components/ui/SkipLink';
 import { authApi } from '../lib/api';
 
@@ -30,9 +30,6 @@ export default function Login() {
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryMsg, setRecoveryMsg] = useState('');
-  const [recoveryToken, setRecoveryToken] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [resetSuccess, setResetSuccess] = useState(false);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   const from = (location.state as any)?.from?.pathname || '/command';
@@ -76,29 +73,8 @@ export default function Login() {
     try {
       const res = await authApi.recover(recoveryEmail);
       setRecoveryMsg(res.message);
-      if (res.resetToken) {
-        setRecoveryToken(res.resetToken);
-      }
     } catch (err: any) {
       setRecoveryMsg(err.message || 'Failed to dispatch recovery.');
-    } finally {
-      setRecoveryLoading(false);
-    }
-  };
-
-  // Step 2 of recovery: exchange the token for a new password.
-  const handleResetPassword = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!recoveryToken || !newPassword) return;
-    setRecoveryLoading(true);
-    try {
-      await authApi.resetPassword(recoveryToken, newPassword);
-      setResetSuccess(true);
-      setRecoveryMsg('Password updated successfully. You can now log in.');
-      setPassword(newPassword);
-      setEmail(recoveryEmail);
-    } catch (err: any) {
-      setRecoveryMsg(err.message || 'Password update failed.');
     } finally {
       setRecoveryLoading(false);
     }
@@ -304,19 +280,14 @@ export default function Login() {
         </div>
 
         {/* Account Recovery Modal */}
-        {/* Account Recovery Modal — reset the FULL flow on close.
-            BUGFIX: recoveryToken/newPassword were previously left set, so
-            reopening the modal skipped straight to the stale reset form. */}
+        {/* Account Recovery Modal */}
         <Modal
           isOpen={showRecovery}
           onClose={() => {
             setShowRecovery(false);
             setRecoveryMsg('');
-            setResetSuccess(false);
-            setRecoveryToken('');
-            setNewPassword('');
           }}
-          title="Account Recovery & Password Reset"
+          title="Account Recovery"
           size="md"
         >
           <div className="space-y-4">
@@ -324,8 +295,7 @@ export default function Login() {
               Reset access for verified OceanGuard operator accounts.
             </p>
 
-            {!recoveryToken ? (
-              <form onSubmit={handleRequestRecovery} className="space-y-3">
+            <form onSubmit={handleRequestRecovery} className="space-y-3">
                 <div>
                   <label htmlFor="recovery-email" className="block text-xs font-medium text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
                     Institutional Email
@@ -341,46 +311,12 @@ export default function Login() {
                   />
                 </div>
                 <Button variant="primary" size="sm" fullWidth loading={recoveryLoading} type="submit" icon={<KeyRound className="w-3.5 h-3.5" />}>
-                  Generate Recovery Token
+                  Request Recovery Help
                 </Button>
-              </form>
-            ) : !resetSuccess ? (
-              <form onSubmit={handleResetPassword} className="space-y-3">
-                <div className="p-2.5 rounded bg-cyan-950/30 border border-cyan-500/30 text-xs text-cyan-300 font-mono">
-                  Token: {recoveryToken}
-                </div>
-                <div>
-                  <label htmlFor="recovery-new-pw" className="block text-xs font-medium text-[var(--ocean-text-dim)] mb-1 uppercase tracking-wider">
-                    New Password (min 6 characters)
-                  </label>
-                  <input
-                    id="recovery-new-pw"
-                    type="password"
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                    placeholder="Enter new password"
-                    minLength={6}
-                    required
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ocean-border)] bg-[var(--ocean-bg)] text-[var(--ocean-text)] focus:border-cyan-500 outline-none"
-                  />
-                </div>
-                <Button variant="primary" size="sm" fullWidth loading={recoveryLoading} type="submit">
-                  Save New Password
-                </Button>
-              </form>
-            ) : (
-              <div className="flex flex-col items-center gap-2 p-4 text-center">
-                <CheckCircle2 className="w-8 h-8 text-green-400" />
-                <p className="text-sm font-semibold text-green-400">Password Reset Complete</p>
-                <p className="text-xs text-[var(--ocean-text-dim)]">You can now authenticate with your new credentials.</p>
-                <Button variant="outline" size="sm" onClick={() => setShowRecovery(false)}>
-                  Return to Sign In
-                </Button>
-              </div>
-            )}
+            </form>
 
             {recoveryMsg && (
-              <div className="p-2.5 rounded bg-[var(--ocean-bg)] border border-[var(--ocean-border)] text-xs text-[var(--ocean-text)]">
+              <div role="status" aria-live="polite" className="p-2.5 rounded bg-[var(--ocean-bg)] border border-[var(--ocean-border)] text-xs text-[var(--ocean-text)]">
                 {recoveryMsg}
               </div>
             )}

@@ -1,11 +1,15 @@
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { storage, StoredUser } from './src/server/storage.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const ESPADA_SERVICE_TOKEN = process.env.ESPADA_SERVICE_TOKEN || '';
+const SESSION_SECRET = process.env.OCEANGUARD_SESSION_SECRET || '';
+const PUBLIC_AI_UNAVAILABLE = 'Espada is temporarily unavailable. Image analysis is paused. Please try again shortly.';
 
 function positiveTimeout(name: string, fallback: number) {
   const configured = Number(process.env[name]);
@@ -14,6 +18,34 @@ function positiveTimeout(name: string, fallback: number) {
 
 const AI_REQUEST_TIMEOUT_MS = positiveTimeout('AI_SERVICE_REQUEST_TIMEOUT_MS', 6000);
 const AI_DETECT_TIMEOUT_MS = positiveTimeout('AI_SERVICE_DETECT_TIMEOUT_MS', 60000);
+
+function createSignedSession(user: StoredUser) {
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  const payload = Buffer.from(JSON.stringify({ sub: user.id, exp: expiresAt })).toString('base64url');
+  const signature = createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return { token: `${payload}.${signature}`, expiresAt };
+}
+
+function findSessionUser(token: string) {
+  if (!SESSION_SECRET) {
+    const session = storage.findSession(token);
+    return session ? storage.findUserById(session.userId) : undefined;
+  }
+
+  try {
+    const [payload, suppliedSignature] = token.split('.');
+    if (!payload || !suppliedSignature) return undefined;
+    const expectedSignature = createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+    const supplied = Buffer.from(suppliedSignature);
+    const expected = Buffer.from(expectedSignature);
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return undefined;
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: string; exp?: string };
+    if (!claims.sub || !claims.exp || Date.parse(claims.exp) <= Date.now()) return undefined;
+    return storage.findUserById(claims.sub);
+  } catch {
+    return undefined;
+  }
+}
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -58,9 +90,7 @@ function requireApiUser(allowedRoles?: Set<string>) {
       return;
     }
 
-    // Check storage session
-    const session = storage.findSession(token);
-    const user = session ? storage.findUserById(session.userId) : undefined;
+    const user = findSessionUser(token);
 
     if (!user) {
       res.status(401).json({ message: 'Session is invalid or has expired. Please sign in again.' });
@@ -146,7 +176,7 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
     return;
   }
 
-  const session = storage.createSession(user);
+  const session = SESSION_SECRET ? createSignedSession(user) : storage.createSession(user);
   res.json({
     token: session.token,
     expiresAt: session.expiresAt,
@@ -157,7 +187,7 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 app.post('/api/auth/logout', (req: Request, res: Response) => {
   const authorization = req.headers.authorization || '';
   const token = authorization.replace(/^Bearer\s+/i, '').trim();
-  if (token) {
+  if (token && !SESSION_SECRET) {
     storage.removeSession(token);
   }
   res.json({ success: true });
@@ -171,8 +201,7 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
     return;
   }
 
-  const session = storage.findSession(token);
-  const user = session ? storage.findUserById(session.userId) : undefined;
+  const user = findSessionUser(token);
 
   if (!user || user.status !== 'ACTIVE') {
     res.status(401).json({ message: 'Invalid or expired session' });
@@ -534,6 +563,10 @@ async function fetchAiJson(pathname: string, init?: RequestInit) {
   try {
     response = await fetch(`${AI_SERVICE_URL}${pathname}`, {
       ...init,
+      headers: {
+        ...(ESPADA_SERVICE_TOKEN ? { 'X-Espada-Service-Token': ESPADA_SERVICE_TOKEN } : {}),
+        ...init?.headers,
+      },
       signal: init?.signal || AbortSignal.timeout(timeoutMs),
     });
   } catch (cause) {
@@ -541,10 +574,8 @@ async function fetchAiJson(pathname: string, init?: RequestInit) {
       cause.name === 'TimeoutError'
       || cause.name === 'AbortError'
     );
-    const message = timedOut
-      ? `Espada did not respond within ${timeoutMs} ms. Try again, or check the inference service.`
-      : 'Espada is unavailable. Start the full stack with npm run dev, or configure AI_SERVICE_URL to your running Espada server.';
-    const error = new Error(message) as Error & { status?: number };
+    console.error(`[ESPADA] ${timedOut ? 'Request timed out' : 'Service unavailable'} for ${pathname}:`, cause);
+    const error = new Error(PUBLIC_AI_UNAVAILABLE) as Error & { status?: number };
     error.status = 503;
     throw error;
   }
@@ -561,9 +592,11 @@ async function fetchAiJson(pathname: string, init?: RequestInit) {
         .filter(Boolean)
         .join('; ')
       : '';
-    const message = typeof payload.detail === 'string'
+    const upstreamMessage = typeof payload.detail === 'string'
       ? payload.detail
       : validationDetails || `Espada service returned HTTP ${response.status}`;
+    console.error(`[ESPADA] Upstream ${response.status} for ${pathname}:`, upstreamMessage);
+    const message = response.status >= 500 ? PUBLIC_AI_UNAVAILABLE : upstreamMessage;
     const error = new Error(message) as Error & { status?: number; details?: any };
     error.status = response.status;
     error.details = payload.detail;
@@ -587,7 +620,7 @@ function offlineModelStatus(error: unknown) {
     confidenceCalibration: 'unavailable',
     metrics: null,
     learning: null,
-    error: error instanceof Error ? error.message : 'Espada service is offline.',
+    error: PUBLIC_AI_UNAVAILABLE,
   };
 }
 
@@ -635,7 +668,7 @@ app.get('/api/ai/models', async (_req: Request, res: Response) => {
 app.post(
   '/api/ai/infer-image',
   requireApiUser(),
-  express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '20mb' }),
+  express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '4mb' }),
   async (req: Request, res: Response) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       res.status(400).json({ message: 'Upload a JPG, PNG, or WebP image.' });
@@ -934,7 +967,11 @@ app.all('/api/*', (_req: Request, res: Response) => {
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[API ERROR]', err);
   if (!res.headersSent) {
-    res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
+    const status = Number.isInteger(err.status) ? err.status : 500;
+    const message = status >= 500
+      ? 'The request could not be completed. Please try again.'
+      : err.message || 'The request could not be completed. Please try again.';
+    res.status(status).json({ message });
   }
 });
 

@@ -32,7 +32,7 @@ interface AnalysisItem {
 }
 
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 function formatMetric(value: number | undefined) {
   if (value == null) return 'Pending';
@@ -123,7 +123,7 @@ export default function DataIngestion() {
     }
     if (file.size > MAX_IMAGE_BYTES) {
       setAnalyses((current) => current.map((entry) => entry.id === item.id
-        ? { ...entry, state: 'FAILED', error: 'Image exceeds the 20 MB limit.' }
+        ? { ...entry, state: 'FAILED', error: 'Image exceeds the 4 MB limit.' }
         : entry));
       return;
     }
@@ -296,6 +296,7 @@ export default function DataIngestion() {
   }, [liveActive]);
 
   const statusVariant = modelStatus?.ready ? 'green' : modelStatus?.state === 'ERROR' ? 'red' : 'amber';
+  const analysisUnavailable = statusLoading || !modelStatus?.ready;
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -309,7 +310,7 @@ export default function DataIngestion() {
                 {statusLoading ? <Badge variant="outline" size="xs">CHECKING</Badge> : <Badge variant={statusVariant} size="xs">{modelStatus?.state || 'OFFLINE'}</Badge>}
               </div>
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-[var(--ocean-text-dim)]">
-                Real server-side object detection. Review each complete frame, correct box geometry, and add debris Espada missed. Only fully reviewed frames can enter candidate training.
+                Server-side marine-debris analysis for uploaded images and live camera frames.
               </p>
               {statusError && <p role="alert" className="mt-2 text-xs text-[#ffb4ab]">{statusError}</p>}
               {(modelStatus?.error || modelStatus?.notice) && <p role="status" className="mt-2 text-xs text-[#ffaa00]">{modelStatus.error || modelStatus.notice}</p>}
@@ -341,9 +342,10 @@ export default function DataIngestion() {
             <div className="rounded-full border border-[#00f5d4]/30 bg-[#00f5d4]/10 p-4 text-[#00f5d4]"><Upload className="h-7 w-7" /></div>
             <div>
               <h3 className="text-sm font-bold text-[var(--ocean-text)]">Test Espada with an image</h3>
-              <p className="mt-1 text-xs text-[var(--ocean-text-dim)]">JPG, PNG, or WebP · maximum 20 MB</p>
+              <p className="mt-1 text-xs text-[var(--ocean-text-dim)]">JPG, PNG, or WebP · maximum 4 MB</p>
             </div>
-            <Button variant="primary" size="sm" icon={<ImageIcon className="h-4 w-4" />} onClick={() => fileRef.current?.click()}>Choose image</Button>
+            <Button variant="primary" size="sm" disabled={analysisUnavailable} icon={<ImageIcon className="h-4 w-4" />} onClick={() => fileRef.current?.click()}>Choose image</Button>
+            {analysisUnavailable && !statusLoading && <p className="text-xs text-[#ffaa00]">Image analysis will be available when Espada reconnects.</p>}
             <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onFile} />
           </div>
         </Card>
@@ -355,7 +357,7 @@ export default function DataIngestion() {
             icon={<Video className="h-4 w-4" />}
             action={liveActive
               ? <Button variant="danger" size="xs" onClick={stopCamera}>Stop camera</Button>
-              : <Button variant="primary" size="xs" disabled={cameraStarting} icon={<Camera className="h-3.5 w-3.5" />} onClick={() => void startCamera()}>{cameraStarting ? 'Opening camera…' : 'Start camera'}</Button>}
+              : <Button variant="primary" size="xs" disabled={cameraStarting || analysisUnavailable} icon={<Camera className="h-3.5 w-3.5" />} onClick={() => void startCamera()}>{cameraStarting ? 'Opening camera…' : 'Start camera'}</Button>}
           />
           <div className="relative flex min-h-52 items-center justify-center overflow-hidden rounded border border-[var(--ocean-border)] bg-[#080e1a]">
             <video ref={videoRef} muted playsInline className={`block h-auto w-full ${liveActive ? '' : 'invisible'}`} />

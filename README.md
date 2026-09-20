@@ -40,6 +40,20 @@ docker compose up --build web ai
 
 No paid AI service is contacted. A paid cloud provider can still charge for the computer hosting the containers.
 
+### Vercel web deployment
+
+The existing Vercel project deploys the React/Express web gateway only. Espada needs its own persistent container because reviewed images and learning state must survive restarts; Vercel functions are stateless.
+
+Deploy `ai_service/Dockerfile` on a persistent container host with a mounted `/data` volume, then set these variables on both services and redeploy the existing Vercel project:
+
+```text
+AI_SERVICE_URL=https://your-private-espada-service.example
+ESPADA_SERVICE_TOKEN=<same-long-random-secret-on-both-services>
+OCEANGUARD_SESSION_SECRET=<different-long-random-secret-on-the-web-service>
+```
+
+The packaged container includes the verified `SSDLite320 MobileNetV3` ONNX pilot model. Keep `/health` available to the host health check; all `/v1/*` routes require `ESPADA_SERVICE_TOKEN` when it is configured.
+
 ## Try Espada
 
 1. Sign in with `operator@oceanguard.ai` and password `demo1234`.
