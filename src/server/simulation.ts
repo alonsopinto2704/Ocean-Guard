@@ -12,6 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { getPositiveDepth } from '../lib/bathymetry.js';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 // ── Seeded RNG (mulberry32) ──────────────────────────────────────────────────
@@ -1209,7 +1210,9 @@ export function exportRunToReplayDataset(run: SimRun): any {
 }
 
 // One durable recording per execution. Atomic replacement prevents partial JSON.
-const replayDirectory = path.resolve(process.env.SIM_REPLAY_DIR || 'data/simulation-replays');
+const replayDirectory = path.resolve(process.env.SIM_REPLAY_DIR || (process.env.VERCEL
+  ? path.join(os.tmpdir(), 'oceanguard-simulation-replays')
+  : 'data/simulation-replays'));
 const lastReplayWrite = new Map<string, number>();
 if (fs.existsSync(replayDirectory)) {
   for (const file of fs.readdirSync(replayDirectory).filter(f => f.endsWith('.json'))) {
