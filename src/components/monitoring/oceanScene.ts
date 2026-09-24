@@ -3,12 +3,15 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Water } from 'three/examples/jsm/objects/Water.js';
 import { createOceanElements } from './oceanElements';
+import {
+  getBathymetricDepth,
+  getBathymetryColor,
+} from '../../lib/bathymetry';
 
 export type OceanMode = 'surface' | 'underwater' | 'sonar';
-export type CameraView = 'orbit' | 'bridge' | 'overhead' | 'inspect';
-function terrainHeight(x: number, z: number) {
-  return -16 + Math.sin(x * .1) * 1.1 + Math.sin(z * .17) * .4 + Math.sin(x * .48 + z * .3) * .12;
-}
+export type CameraView = 'orbit' | 'bridge' | 'overhead' | 'seabed' | 'inspect';
+
+const terrainHeight = getBathymetricDepth;
 export const CONTACTS = [
   { id: 'NET-01', name: 'Drifting fishing net', type: 'Entanglement hazard', risk: 'HIGH', depth: 1.8, x: 12, z: -17, color: '#efb879' },
   { id: 'PET-02', name: 'Floating bottles', type: 'Surface litter', risk: 'MEDIUM', depth: 0, x: -10, z: -12, color: '#9fe1db' },
@@ -52,8 +55,8 @@ function vessel() {
   const hullMat = new THREE.MeshStandardMaterial({ color: '#183e48', roughness: .4, metalness: .28 });
   const metal = new THREE.MeshStandardMaterial({ color: '#b0b9b6', roughness: .27, metalness: .8 });
   const rubber = new THREE.MeshStandardMaterial({ color: '#242e2f', roughness: .88 });
-  const glass = new THREE.MeshPhysicalMaterial({ color: '#204049', roughness: .07, metalness: .32, clearcoat: 1 });
-  function box(w: number, h: number, d: number, x: number, y: number, z: number, mat = white) {
+  const glass = new THREE.MeshPhysicalMaterial({ color: '#5b9aab', roughness: .07, metalness: .1, clearcoat: 1, transparent: true, opacity: .34, depthWrite: false, side: THREE.DoubleSide });
+  function box(w: number, h: number, d: number, x: number, y: number, z: number, mat: THREE.Material = white) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z); mesh.castShadow = mesh.receiveShadow = true; boat.add(mesh); return mesh;
   }
@@ -82,8 +85,25 @@ function vessel() {
   outline.lineTo(-2.15, 6.5); outline.lineTo(-2.5, 3.8); outline.lineTo(-2.45, -4.7); outline.lineTo(-1.65, -6.7); outline.closePath();
   const deck = new THREE.Mesh(new THREE.ShapeGeometry(outline), new THREE.MeshStandardMaterial({ map: weatheredTexture('deck'), roughness: .9, side: THREE.DoubleSide }));
   deck.rotation.x = Math.PI / 2; deck.position.y = 1.34; deck.receiveShadow = true; boat.add(deck);
-  box(3.65, 2.25, 4.8, 0, 2.49, -.8);
+  // Open bridge cabin: the helm camera needs a real line of sight through the
+  // front glazing. The old solid box blocked every first-person bridge view.
+  box(3.65, .15, 4.8, 0, 1.45, -.8);
+  box(3.65, .72, .13, 0, 1.79, -3.2);
+  box(3.65, .2, .13, 0, 3.48, -3.2);
+  box(3.65, 2.25, .13, 0, 2.49, 1.58);
+  for (const side of [-1, 1]) {
+    box(.14, .8, 4.8, side * 1.78, 1.87, -.8);
+    box(.14, .3, 4.8, side * 1.78, 3.48, -.8);
+    for (const z of [-3.15, -1.8, -.45, .9, 1.53]) box(.14, 1.28, .12, side * 1.78, 2.91, z);
+  }
+  for (const x of [-1.78, -.54, .54, 1.78]) box(.12, 1.28, .13, x, 2.88, -3.2);
   box(3.9, .16, 5.1, 0, 3.7, -.85);
+  const consoleMat = new THREE.MeshStandardMaterial({ color: '#24363a', roughness: .64, metalness: .3 });
+  box(2.7, .16, .78, 0, 2.12, -2.62, consoleMat);
+  const screenMat = new THREE.MeshStandardMaterial({ color: '#1b8792', roughness: .3, metalness: .1, emissive: '#0d4a50' });
+  for (const x of [-.72, 0, .72]) box(.49, .2, .04, x, 2.31, -2.84, screenMat);
+  const helm = new THREE.Mesh(new THREE.TorusGeometry(.29, .035, 8, 24), metal);
+  helm.position.set(0, 2.49, -2.55); boat.add(helm);
   // Individual inset bridge windows, frames, and sloped forward glazing.
   for (const side of [-1, 1]) {
     for (let i = 0; i < 3; i++) box(.035, .8, 1.08, side * 1.84, 2.97, -2.1 + i * 1.35, glass);
@@ -123,7 +143,7 @@ function vessel() {
   return boat;
 }
 
-function buildContact(index: number) {
+export function buildContact(index: number) {
   const group = new THREE.Group();
   if (index === 0) {
     const points: THREE.Vector3[] = [];
@@ -137,13 +157,20 @@ function buildContact(index: number) {
     }
   } else if (index === 1) {
     const random = rng(3);
-    const plastic = new THREE.MeshStandardMaterial({ color: '#d3e4df', metalness: .02, roughness: .2, transparent: true, opacity: .8 });
-    const profile = [[0, -.36], [.1, -.35], [.12, -.3], [.12, .17], [.07, .26], [.045, .29], [.045, .36]].map(([x,y]) => new THREE.Vector2(x, y));
-    for (let i = 0; i < 9; i++) {
-      const bottle = new THREE.Group(); bottle.add(new THREE.Mesh(new THREE.LatheGeometry(profile, 16), plastic));
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(.052, .052, .065, 12), new THREE.MeshStandardMaterial({ color: i % 2 ? '#437f81' : '#dedbd2' }));
-      cap.position.y = .39; bottle.add(cap);
-      bottle.rotation.set(1.5, random() * 6, random() * .5); bottle.position.set((random() - .5) * 3, .05, (random() - .5) * 2.5); group.add(bottle);
+    const profile = [[0, -.58], [.23, -.57], [.24, -.48], [.25, .2], [.19, .35], [.085, .48], [.085, .57]].map(([radius, height]) => new THREE.Vector2(radius, height));
+    for (let i = 0; i < 5; i++) {
+      const bottle = new THREE.Group();
+      const plastic = new THREE.MeshPhysicalMaterial({ color: i % 3 === 0 ? '#87b5a5' : i % 3 === 1 ? '#c5ded9' : '#8ca9c1', roughness: .3, metalness: 0, transparent: true, opacity: .82, side: THREE.DoubleSide });
+      bottle.add(new THREE.Mesh(new THREE.LatheGeometry(profile, 24), plastic));
+      for (const height of [-.32, -.16, .02]) {
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(.251, .012, 6, 24), plastic);
+        rib.rotation.x = Math.PI / 2; rib.position.y = height; bottle.add(rib);
+      }
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .13, 16), new THREE.MeshStandardMaterial({ color: i % 2 ? '#e9e9dc' : '#258c91', roughness: .6 }));
+      cap.position.y = .63; bottle.add(cap);
+      bottle.rotation.set(Math.PI / 2 + (random() - .5) * .5, random() * Math.PI, (random() - .5) * .25);
+      bottle.position.set((random() - .5) * 3.2, .25, (random() - .5) * 2.6);
+      group.add(bottle);
     }
   } else if (index === 2) {
     const rusty = new THREE.MeshStandardMaterial({ map: weatheredTexture('rust'), roughness: .94, metalness: .35 });
@@ -258,6 +285,123 @@ function buildContact(index: number) {
   return group;
 }
 
+/** Authored scenario geometry shared by live monitoring, replay and previews. */
+export function buildScenarioVisual(id: string): THREE.Group | null {
+  const equivalent: Record<string, string> = {
+    'BTH-02': 'NET-01', 'BTH-04': 'TYR-04', 'BTH-05': 'BUO-05', 'BTH-06': 'DRN-06',
+    'SRG-01': 'NET-01', 'SRG-02': 'PET-02', 'SRG-03': 'DRM-03',
+    'SRG-05': 'BUO-05', 'SRG-07': 'BAG-07',
+  };
+  const index = CONTACTS.findIndex(contact => contact.id === (equivalent[id] ?? id));
+  if (index >= 0) {
+    const model = buildContact(index);
+    model.position.set(0, 0, 0);
+    if (id === 'BTH-04') model.scale.setScalar(1.45);
+    return model;
+  }
+
+  const group = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: '#687c7d', metalness: .65, roughness: .55 });
+  const rust = new THREE.MeshStandardMaterial({ color: '#8c6047', metalness: .35, roughness: .9 });
+  const dark = new THREE.MeshStandardMaterial({ color: '#28383c', metalness: .35, roughness: .7 });
+  const plastic = new THREE.MeshStandardMaterial({ color: '#b2c9bd', roughness: .7, side: THREE.DoubleSide });
+  const add = (geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  switch (id) {
+    case 'BTH-01': { // pressure cylinder, with rounded ends and a valve
+      add(new THREE.CylinderGeometry(.48, .48, 2.7, 24), steel).rotation.z = Math.PI / 2;
+      for (const x of [-1.35, 1.35]) add(new THREE.SphereGeometry(.48, 20, 12), steel, x);
+      add(new THREE.CylinderGeometry(.1, .1, .55, 12), dark, 1.68);
+      add(new THREE.BoxGeometry(.45, .08, .12), rust, 1.9);
+      break;
+    }
+    case 'BTH-03': { // sealed battery enclosure with terminals
+      add(new THREE.BoxGeometry(2.2, .9, 1.35), dark);
+      add(new THREE.BoxGeometry(2.25, .12, 1.4), steel, 0, .52);
+      for (const x of [-.55, .55]) {
+        add(new THREE.CylinderGeometry(.11, .11, .3, 12), rust, x, .73);
+        add(new THREE.CylinderGeometry(.16, .16, .04, 12), steel, x, .9);
+      }
+      break;
+    }
+    case 'BTH-07': { // reinforced open slat crate
+      add(new THREE.BoxGeometry(2.1, .12, 1.5), rust, 0, -.55);
+      for (const x of [-.96, .96]) for (const z of [-.66, .66]) add(new THREE.BoxGeometry(.16, 1.15, .16), steel, x, .02, z);
+      for (const y of [-.4, .4]) {
+        for (const z of [-.66, .66]) add(new THREE.BoxGeometry(2.15, .13, .14), rust, 0, y, z);
+        for (const x of [-.96, .96]) add(new THREE.BoxGeometry(.14, .13, 1.5), rust, x, y);
+      }
+      break;
+    }
+    case 'BTH-08': { // hollow sampling core, visually unlike a sealed drum
+      const pipe = add(new THREE.CylinderGeometry(.22, .22, 4.2, 24, 1, true), steel);
+      pipe.rotation.z = Math.PI / 2;
+      for (const x of [-2.05, 2.05]) {
+        const lip = add(new THREE.TorusGeometry(.22, .045, 8, 24), rust, x);
+        lip.rotation.y = Math.PI / 2;
+      }
+      break;
+    }
+    case 'SRG-04': { // long rubber dock fender with coloured end caps
+      const rubber = new THREE.MeshStandardMaterial({ color: '#222b2b', roughness: .95 });
+      add(new THREE.CylinderGeometry(.4, .4, 2.8, 24), rubber).rotation.z = Math.PI / 2;
+      for (const x of [-1.4, 1.4]) add(new THREE.CylinderGeometry(.42, .42, .14, 24), rust, x).rotation.z = Math.PI / 2;
+      break;
+    }
+    case 'SRG-06': { // small surface survey vessel
+      add(new THREE.BoxGeometry(1.6, .4, 3.1), steel, 0, -.2);
+      add(new THREE.BoxGeometry(.85, .7, .9), plastic, 0, .35, -.15);
+      add(new THREE.BoxGeometry(.95, .13, 1.35), dark, 0, .76, -.14);
+      add(new THREE.CylinderGeometry(.035, .035, .85, 8), steel, 0, 1.23, -.14);
+      break;
+    }
+    case 'SRG-08': { // a broken, curved hull section
+      const hull = add(new THREE.CylinderGeometry(1.25, 1.25, 3.2, 32, 1, true, -.85, 1.7), rust);
+      hull.rotation.z = Math.PI / 2;
+      for (const x of [-1.3, 0, 1.3]) add(new THREE.BoxGeometry(.12, 1.8, 1.1), steel, x, -.3);
+      break;
+    }
+    default: return null;
+  }
+  return group;
+}
+
+export interface DynamicContact {
+  id: string;
+  name: string;
+  className: string;
+  type: string;
+  /** UNKNOWN is used when no model confidence was reported: never invent a risk grade. */
+  risk: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+  depth: number;
+  /** Source fixture visual only; position/depth are still labelled as simulated. */
+  scenarioObjectId?: string;
+  x: number;
+  z: number;
+  uncertaintyM: number;
+  status: 'ACTIVE' | 'STALE' | 'LOST';
+  reviewStatus: 'UNREVIEWED' | 'CONFIRMED' | 'FALSE_POSITIVE' | 'CORRECTED';
+  locationUnknown?: boolean;
+  confidence?: number;
+  rawConfidence?: number;
+  confidenceCalibrated?: boolean;
+  anomalyScore?: boolean;
+  frameUrl?: string;
+  captureTime?: string | null;
+  lastTS?: number;
+}
+
+export interface BathymetryBatch {
+  samples: Array<{ eastM: number; northM: number; depthM: number }>;
+  cellSizeM: number;
+  source: 'SIMULATED_SONAR' | 'SENSOR';
+}
+
 export interface OceanController {
   setMode(mode: OceanMode): void;
   setCamera(view: CameraView): void;
@@ -266,7 +410,107 @@ export interface OceanController {
   setPaused(paused: boolean): void;
   zoom(amount: number): void;
   setDepth(depth: number): void;
+  setLiveMode(active: boolean): void;
+  updateLiveContacts(contacts: DynamicContact[]): void;
+  updateBathymetry(batch: BathymetryBatch | null): number;
+  updateVesselPose(eastM: number, northM: number, headingDeg: number): void;
   dispose(): void;
+}
+
+function buildDynamicContactMesh(c: DynamicContact): THREE.Group {
+  const authored = c.scenarioObjectId ? buildScenarioVisual(c.scenarioObjectId) : null;
+  const group = authored ?? new THREE.Group();
+  group.position.set(0, 0, 0);
+  group.name = `dynamic-${c.id}`;
+
+  const isLost = c.status === 'LOST';
+  const isStale = c.status === 'STALE';
+  const accentColor = c.reviewStatus === 'CONFIRMED'
+    ? '#10b981'
+    : c.reviewStatus === 'FALSE_POSITIVE'
+      ? '#ef4444'
+      : isLost
+        ? '#ef4444'
+        : isStale
+          ? '#f59e0b'
+          : '#38bdf8';
+
+  // Unknown model contacts have no defensible object type. Render a visibly
+  // damaged mix of debris instead of a clean blue placeholder cylinder.
+  if (!authored) {
+    const rust = new THREE.MeshStandardMaterial({ color: '#85533e', roughness: 1, metalness: 0.35, flatShading: true });
+    const plastic = new THREE.MeshStandardMaterial({ color: '#b5d2c5', roughness: 0.9, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+    const rope = new THREE.MeshStandardMaterial({ color: '#ad8650', roughness: 1 });
+    const can = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.42, 0.8, 9, 2), rust);
+    can.rotation.set(0.2, 0.5, 1.1);
+    can.position.set(-0.25, 0, 0);
+    can.castShadow = true;
+    group.add(can);
+    const tornSheet = new THREE.PlaneGeometry(1.45, 0.85, 4, 2);
+    const sheetPositions = tornSheet.attributes.position;
+    for (let i = 0; i < sheetPositions.count; i++) sheetPositions.setZ(i, Math.sin(i * 2.1) * 0.13);
+    tornSheet.computeVertexNormals();
+    const sheet = new THREE.Mesh(tornSheet, plastic);
+    sheet.rotation.set(-0.65, 0.3, 0.35);
+    sheet.position.set(0.25, 0.1, 0.25);
+    group.add(sheet);
+    const cord = new THREE.Mesh(new THREE.TorusGeometry(0.63, 0.035, 5, 18, Math.PI * 1.65), rope);
+    cord.rotation.set(0.65, 0.2, 0.15);
+    cord.position.set(0.15, -0.15, -0.1);
+    group.add(cord);
+    const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 0.62, 7), plastic);
+    bottle.rotation.z = 0.8;
+    bottle.position.set(0.65, -0.18, -0.35);
+    group.add(bottle);
+  }
+
+  // Beacon strobe dome
+  const strobeMat = new THREE.MeshBasicMaterial({ color: accentColor, transparent: true, opacity: 1.0 });
+  const strobe = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), strobeMat);
+  strobe.name = 'beaconStrobe';
+  strobe.position.y = 0.42;
+  group.add(strobe);
+
+  // Uncertainty perimeter ring
+  const ringRadius = Math.max(1.2, Math.min(30, c.uncertaintyM));
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: accentColor,
+    transparent: true,
+    opacity: isLost ? 0.25 : isStale ? 0.45 : 0.75,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(ringRadius - 0.12, ringRadius, 64), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.05;
+  ring.name = 'uncertaintyRing';
+  group.add(ring);
+
+  group.userData.contact = c.id;
+  group.traverse(obj => {
+    obj.userData.contact = c.id;
+    if (obj instanceof THREE.Mesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+
+  return group;
+}
+
+function disposeDynamicContact(group: THREE.Group) {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  group.traverse(object => {
+    const drawable = object as THREE.Mesh;
+    if (drawable.geometry) geometries.add(drawable.geometry);
+    if (drawable.material) for (const material of Array.isArray(drawable.material) ? drawable.material : [drawable.material]) materials.add(material);
+  });
+  geometries.forEach(geometry => geometry.dispose());
+  materials.forEach(material => {
+    Object.values(material).forEach(value => { if (value instanceof THREE.Texture) value.dispose(); });
+    material.dispose();
+  });
 }
 
 export function createOceanScene(container: HTMLElement, onSelect: (id: string) => void, onFrame: (fps: number, depth: number, heading: number) => void, labels: Map<string, HTMLElement>, onError: (message: string | null) => void, onModeChange: (mode: OceanMode) => void = () => {}, onNavigate: () => void = () => {}): OceanController {
@@ -364,30 +608,92 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
     islandMesh.position.set(-1100 + island * 720, 0, -900 - (island % 2) * 220); landscape.add(islandMesh);
   }
   const boat = vessel(); scene.add(boat);
+  // The survey platform is the AUV from the original coastal-watch scene.
+  // In simulation its camera supplies the frame events and its sonar supplies cells.
+  const auv = buildContact(5);
+  auv.visible = false;
+  scene.add(auv);
+  const deploymentGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const deploymentLine = new THREE.Line(deploymentGeometry, new THREE.LineBasicMaterial({ color: '#b5d6bf', transparent: true, opacity: 0.55 }));
+  deploymentLine.frustumCulled = false;
+  deploymentLine.visible = false;
+  scene.add(deploymentLine);
   const habitat = createOceanElements(terrainHeight); scene.add(habitat.group);
   const contactMeshes = CONTACTS.map((_, i) => buildContact(i)); contactMeshes.forEach(c => scene.add(c));
+  const dynamicGroup = new THREE.Group(); scene.add(dynamicGroup);
+  const dynamicMeshes = new Map<string, { group: THREE.Group; contact: DynamicContact; uncertaintyRadius: number }>();
+  let isLiveMode = false;
+  let vesselPose = { eastM: 0, northM: 0, headingDeg: 0 };
   const radar = boat.getObjectByName('radar')!;
   const buoyStrobe = contactMeshes[4].getObjectByName('buoyStrobe') as THREE.Mesh;
   const floatingIndices = [0, 1, 4, 6];
 
-  const seabedGeometry = new THREE.PlaneGeometry(600, 600, 150, 150); seabedGeometry.rotateX(-Math.PI / 2);
+  const seabedGeometry = new THREE.PlaneGeometry(800, 800, 220, 220);
+  seabedGeometry.rotateX(-Math.PI / 2);
   const bedPositions = seabedGeometry.attributes.position;
-  for (let i = 0; i < bedPositions.count; i++) { bedPositions.setY(i, terrainHeight(bedPositions.getX(i), bedPositions.getZ(i))); }
+  const bedColors = new Float32Array(bedPositions.count * 3);
+  for (let i = 0; i < bedPositions.count; i++) {
+    const x = bedPositions.getX(i);
+    const z = bedPositions.getZ(i);
+    const y = terrainHeight(x, z);
+    bedPositions.setY(i, y);
+    const col = getBathymetryColor(-y);
+    bedColors[i * 3]     = col.r;
+    bedColors[i * 3 + 1] = col.g;
+    bedColors[i * 3 + 2] = col.b;
+  }
+  seabedGeometry.setAttribute('color', new THREE.BufferAttribute(bedColors, 3));
   seabedGeometry.computeVertexNormals();
-  const bedMaterial = new THREE.MeshStandardMaterial({ map: weatheredTexture('sand'), roughness: 1 });
+
+  const bedMaterial = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.85,
+    metalness: 0.15,
+    bumpMap: weatheredTexture('sand'),
+    bumpScale: 0.12,
+  });
   const causticTime = { value: 0 }, causticStrength = { value: 0 };
   bedMaterial.onBeforeCompile = shader => {
-    shader.uniforms.causticTime = causticTime; shader.uniforms.causticStrength = causticStrength;
+    shader.uniforms.causticTime = causticTime;
+    shader.uniforms.causticStrength = causticStrength;
     shader.vertexShader = 'varying vec3 bedWorld;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n bedWorld = (modelMatrix * vec4(position, 1.0)).xyz;');
-    shader.fragmentShader = 'varying vec3 bedWorld; uniform float causticTime; uniform float causticStrength;\n' + shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+    shader.fragmentShader = 'varying vec3 bedWorld; uniform float causticTime; uniform float causticStrength;\n' + shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
       vec2 p = bedWorld.xz * .9;
       float a = sin(p.x + sin(p.y + causticTime*.27)) + sin(p.y*.86 - causticTime*.3);
       float b = sin(p.x*.79 - causticTime*.22 + cos(p.y*1.23)) + cos(p.y + causticTime*.21);
       float light = pow(max(0.0, 1.0-abs(a*b)), 14.0);
       diffuseColor.rgb *= 1.0 + light * causticStrength;
+
+      // Illuminated bathymetric contour isobars (5m intervals)
+      float d = abs(bedWorld.y);
+      float contour = mod(d, 5.0);
+      float isobar = smoothstep(0.32, 0.0, contour) + smoothstep(4.68, 5.0, contour);
+      diffuseColor.rgb += vec3(0.0, 0.96, 0.83) * isobar * 0.4;
     `);
   };
-  const seabed = new THREE.Mesh(seabedGeometry, bedMaterial); seabed.receiveShadow = true; scene.add(seabed);
+  const seabed = new THREE.Mesh(seabedGeometry, bedMaterial);
+  seabed.receiveShadow = true;
+  scene.add(seabed);
+
+  // Reconstructed 3D bathymetry layer
+
+  // Active Multibeam Sonar Fan projecting under vessel
+  const sonarConeGeo = new THREE.ConeGeometry(8, 22, 16, 1, true);
+  sonarConeGeo.rotateX(Math.PI);
+  sonarConeGeo.translate(0, -11, 0);
+  const sonarConeMat = new THREE.MeshBasicMaterial({
+    color: '#00f5d4',
+    transparent: true,
+    opacity: 0.16,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const sonarBeam = new THREE.Mesh(sonarConeGeo, sonarConeMat);
+  sonarBeam.position.set(0, -0.5, 0);
+  boat.add(sonarBeam);
+  // Coverage is counted here; the continuous seabed is rendered below. The
+  // separate replay surface is reconstructed from these same sonar events.
+  const surveyCells = new Set<string>();
   const random = rng(51);
   const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 1), new THREE.MeshStandardMaterial({ color: '#626e60', roughness: 1 }), 100);
   const dummy = new THREE.Object3D();
@@ -417,7 +723,21 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
   const targetCamPos = new THREE.Vector3(26, 12, 33);
   const targetLookAt = new THREE.Vector3(0, 1, -5);
   let isTransitioning = false;
+  let cameraView: CameraView = 'orbit';
+  let lastAuvX = 0;
+  let lastAuvZ = 0;
   let presetTransition = false;
+  const bridgePosition = new THREE.Vector3();
+  const bridgeLookAt = new THREE.Vector3();
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  function updateBridgeTarget() {
+    // The bow faces local -Z. The camera sits inside the open bridge cabin,
+    // behind the forward glazing and above the helm console.
+    bridgePosition.set(0, 2.9, -1.1).applyAxisAngle(worldUp, boat.rotation.y).add(boat.position);
+    bridgeLookAt.set(0, 2.45, -28).applyAxisAngle(worldUp, boat.rotation.y).add(boat.position);
+    targetCamPos.copy(bridgePosition);
+    targetLookAt.copy(bridgeLookAt);
+  }
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
   const surfaceFog = new THREE.Color('#c3d7da'), deepFog = new THREE.Color('#12535a'), sonarFog = new THREE.Color('#061c20');
   const background = new THREE.Color();
@@ -425,6 +745,8 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
   controls.enableZoom = false;
   function descend(pixels: number) {
     presetTransition = false;
+    cameraView = 'orbit';
+    controls.enabled = true;
     if (!isTransitioning) {
       targetCamPos.copy(camera.position);
       targetLookAt.copy(controls.target);
@@ -441,7 +763,11 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
     descend(THREE.MathUtils.clamp(event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientHeight : 1), -160, 160));
   };
   renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
-  const onOrbitStart = () => { isTransitioning = false; };
+  const onOrbitStart = () => {
+    isTransitioning = false;
+    presetTransition = false;
+    if (cameraView !== 'orbit') { cameraView = 'orbit'; onNavigate(); }
+  };
   controls.addEventListener('start', onOrbitStart);
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(), projected = new THREE.Vector3(), cameraDirection = new THREE.Vector3();
   let down = [0, 0];
@@ -449,7 +775,9 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
   const onUp = (e: PointerEvent) => {
     if (Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
-    const hit = raycaster.intersectObjects(contactMeshes, true)[0]; if (hit?.object.userData.contact) onSelect(hit.object.userData.contact);
+    const hitList = isLiveMode ? dynamicGroup.children : contactMeshes;
+    const hit = raycaster.intersectObjects(hitList, true)[0];
+    if (hit?.object.userData.contact) onSelect(hit.object.userData.contact);
   };
   renderer.domElement.addEventListener('pointerdown', onDown); renderer.domElement.addEventListener('pointerup', onUp);
   const onContextLost = (event: Event) => {
@@ -473,10 +801,12 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
   };
   const observer = new ResizeObserver(resize); observer.observe(container); resize();
   function constrainView() {
-    controls.target.x = THREE.MathUtils.clamp(controls.target.x, -100, 100);
-    controls.target.z = THREE.MathUtils.clamp(controls.target.z, -100, 100);
-    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -140, 140);
-    camera.position.z = THREE.MathUtils.clamp(camera.position.z, -140, 140);
+    const originX = isLiveMode ? boat.position.x : 0;
+    const originZ = isLiveMode ? boat.position.z : 0;
+    controls.target.x = THREE.MathUtils.clamp(controls.target.x, originX - 100, originX + 100);
+    controls.target.z = THREE.MathUtils.clamp(controls.target.z, originZ - 100, originZ + 100);
+    camera.position.x = THREE.MathUtils.clamp(camera.position.x, originX - 140, originX + 140);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, originZ - 140, originZ + 140);
     controls.target.y = THREE.MathUtils.clamp(controls.target.y, -35, 80);
     camera.position.y = THREE.MathUtils.clamp(camera.position.y, terrainHeight(camera.position.x, camera.position.z) + .8, 90);
   }
@@ -490,28 +820,79 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
     if (!paused) elapsed += dt;
     water.material.uniforms.time.value = elapsed; water.material.uniforms.seaState.value = waveStrength;
     undersideMaterial.uniforms.time.value = elapsed; undersideMaterial.uniforms.seaState.value = waveStrength; causticTime.value = elapsed;
-    boat.position.y = waveHeight(0, 0, elapsed, waveStrength);
+
+    const boatX = isLiveMode ? vesselPose.eastM : 0;
+    const boatZ = isLiveMode ? -vesselPose.northM : 0;
+    boat.position.x = boatX;
+    boat.position.z = boatZ;
+    boat.position.y = waveHeight(boatX, boatZ, elapsed, waveStrength);
     if (showSubmerged && !paused) habitat.update(elapsed, waveHeight(22, -8, elapsed, waveStrength));
-    boat.rotation.x = (waveHeight(0, -4, elapsed, waveStrength) - waveHeight(0, 4, elapsed, waveStrength)) / 8;
-    boat.rotation.z = (waveHeight(2, 0, elapsed, waveStrength) - waveHeight(-2, 0, elapsed, waveStrength)) / 4;
+    boat.rotation.x = (waveHeight(boatX, boatZ - 4, elapsed, waveStrength) - waveHeight(boatX, boatZ + 4, elapsed, waveStrength)) / 8;
+    boat.rotation.z = (waveHeight(boatX + 2, boatZ, elapsed, waveStrength) - waveHeight(boatX - 2, boatZ, elapsed, waveStrength)) / 4;
+    boat.rotation.y = isLiveMode ? -(vesselPose.headingDeg * Math.PI) / 180 : 0;
+    auv.position.set(boatX, -4.8 + Math.sin(elapsed * .45) * .12, boatZ);
+    auv.rotation.y = -(vesselPose.headingDeg * Math.PI) / 180;
+    const deploymentPoints = deploymentGeometry.attributes.position as THREE.BufferAttribute;
+    deploymentPoints.setXYZ(0, boatX, boat.position.y, boatZ);
+    deploymentPoints.setXYZ(1, auv.position.x, auv.position.y, auv.position.z);
+    deploymentPoints.needsUpdate = true;
+    if (isLiveMode && cameraView === 'bridge') {
+      updateBridgeTarget();
+      isTransitioning = true;
+    } else if (isLiveMode) {
+      const dx = boatX - lastAuvX;
+      const dz = boatZ - lastAuvZ;
+      camera.position.x += dx; camera.position.z += dz;
+      controls.target.x += dx; controls.target.z += dz;
+      targetCamPos.x += dx; targetCamPos.z += dz;
+      targetLookAt.x += dx; targetLookAt.z += dz;
+    }
+    lastAuvX = boatX;
+    lastAuvZ = boatZ;
     radar.rotation.y = elapsed * 1.5;
 
-    // Wave physics for floating / surface-connected objects
-    contactMeshes.forEach((group, i) => {
-      const c = CONTACTS[i];
-      if (floatingIndices.includes(i)) {
-        group.position.y = waveHeight(c.x, c.z, elapsed, waveStrength) - c.depth;
-        group.rotation.x = (waveHeight(c.x, c.z - .6, elapsed, waveStrength) - waveHeight(c.x, c.z + .6, elapsed, waveStrength)) / 1.2;
-        group.rotation.z = (waveHeight(c.x + .6, c.z, elapsed, waveStrength) - waveHeight(c.x - .6, c.z, elapsed, waveStrength)) / 1.2;
-      } else if (i === 5) {
-        // DRN-06: Autonomous survey AUV survey sweep
-        const droneDx = Math.sin(elapsed * .25) * 2.4;
-        const droneDz = Math.cos(elapsed * .25) * 1.8;
-        group.position.set(c.x + droneDx, -c.depth + Math.sin(elapsed * .5) * .22, c.z + droneDz);
-        group.rotation.y = -elapsed * .25 + Math.PI / 2;
-        group.rotation.z = Math.sin(elapsed * .25) * .08;
-      }
-    });
+    // Wave physics for static floating contacts (when not in live mode)
+    if (!isLiveMode) {
+      contactMeshes.forEach((group, i) => {
+        const c = CONTACTS[i];
+        if (floatingIndices.includes(i)) {
+          group.position.y = waveHeight(c.x, c.z, elapsed, waveStrength) - c.depth;
+          group.rotation.x = (waveHeight(c.x, c.z - .6, elapsed, waveStrength) - waveHeight(c.x, c.z + .6, elapsed, waveStrength)) / 1.2;
+          group.rotation.z = (waveHeight(c.x + .6, c.z, elapsed, waveStrength) - waveHeight(c.x - .6, c.z, elapsed, waveStrength)) / 1.2;
+        } else if (i === 5) {
+          // DRN-06: Autonomous survey AUV survey sweep
+          const droneDx = Math.sin(elapsed * .25) * 2.4;
+          const droneDz = Math.cos(elapsed * .25) * 1.8;
+          group.position.set(c.x + droneDx, -c.depth + Math.sin(elapsed * .5) * .22, c.z + droneDz);
+          group.rotation.y = -elapsed * .25 + Math.PI / 2;
+          group.rotation.z = Math.sin(elapsed * .25) * .08;
+        }
+      });
+    } else {
+      // Dynamic contacts update in live mode
+      dynamicMeshes.forEach(({ group, contact }) => {
+        if (contact.locationUnknown) {
+          group.visible = false;
+          return;
+        }
+        group.visible = true;
+        const objY = contact.depth > 0
+          ? -contact.depth
+          : waveHeight(contact.x, contact.z, elapsed, waveStrength);
+        group.position.set(contact.x, objY, contact.z);
+        group.rotation.x = (waveHeight(contact.x, contact.z - 0.6, elapsed, waveStrength) - waveHeight(contact.x, contact.z + 0.6, elapsed, waveStrength)) / 1.2;
+        group.rotation.z = (waveHeight(contact.x + 0.6, contact.z, elapsed, waveStrength) - waveHeight(contact.x - 0.6, contact.z, elapsed, waveStrength)) / 1.2;
+
+        const strobe = group.getObjectByName('beaconStrobe') as THREE.Mesh | undefined;
+        if (strobe && strobe.material instanceof THREE.MeshBasicMaterial) {
+          if (contact.status === 'ACTIVE') {
+            strobe.material.opacity = Math.floor(elapsed * 2.8) % 2 === 0 ? 1.0 : 0.25;
+          } else {
+            strobe.material.opacity = contact.status === 'STALE' ? 0.45 : 0.2;
+          }
+        }
+      });
+    }
 
     // Buoy beacon strobe
     if (buoyStrobe && buoyStrobe.material instanceof THREE.MeshBasicMaterial) {
@@ -538,14 +919,23 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
     if (showSubmerged) fishSchool.instanceMatrix.needsUpdate = true;
 
     scan.rotation.z = -elapsed * .35;
-    const contactIndex = CONTACTS.findIndex(c => c.id === selected), contact = CONTACTS[contactIndex];
-    if (contact && contactMeshes[contactIndex]) {
-      const targetMesh = contactMeshes[contactIndex];
-      const isSurface = floatingIndices.includes(contactIndex);
-      const ringY = mode === 'surface'
-        ? waveHeight(contact.x, contact.z, elapsed, waveStrength) + .08
-        : isSurface ? targetMesh.position.y + .35 : targetMesh.position.y + (contactIndex === 7 ? 1.4 : .35);
-      selectedRing.position.set(targetMesh.position.x, ringY, targetMesh.position.z);
+    let targetMesh: THREE.Object3D | null = null;
+    if (isLiveMode) {
+      const dyn = dynamicMeshes.get(selected);
+      if (dyn && !dyn.contact.locationUnknown && dyn.group.visible) {
+        targetMesh = dyn.group;
+      }
+    } else {
+      const contactIndex = CONTACTS.findIndex(c => c.id === selected);
+      if (contactIndex >= 0 && contactMeshes[contactIndex]) {
+        targetMesh = contactMeshes[contactIndex];
+      }
+    }
+    if (targetMesh) {
+      selectedRing.visible = true;
+      selectedRing.position.set(targetMesh.position.x, targetMesh.position.y + 0.25, targetMesh.position.z);
+    } else {
+      selectedRing.visible = false;
     }
 
     // Smooth camera lerping when transitioning
@@ -560,7 +950,7 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
       }
     }
 
-    controls.update();
+    if (cameraView !== 'bridge') controls.update();
     constrainView();
     camera.lookAt(controls.target);
     // The camera crosses one continuous ocean; lighting follows its actual height.
@@ -584,13 +974,31 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
     hemi.intensity = THREE.MathUtils.lerp(1.1, .85, immersion);
     sunlight.intensity = THREE.MathUtils.lerp(2, 1.2, immersion);
     if (now - labelTime > 40) {
-      contactMeshes.forEach((group, i) => {
-        const element = labels.get(CONTACTS[i].id); if (!element) return;
-        projected.copy(group.position); projected.y = mode === 'surface' ? 1.2 : group.position.y + 1.2; projected.project(camera);
-        const visible = projected.z < 1 && projected.z > -1 && Math.abs(projected.x) < .98 && Math.abs(projected.y) < .9;
-        element.style.visibility = visible ? 'visible' : 'hidden';
-        element.style.transform = `translate(${(projected.x * .5 + .5) * container.clientWidth}px, ${(-projected.y * .5 + .5) * container.clientHeight}px) translate(-50%, -100%)`;
-      }); labelTime = now;
+      if (isLiveMode) {
+        dynamicMeshes.forEach(({ group, contact }) => {
+          const element = labels.get(contact.id);
+          if (!element) return;
+          if (contact.locationUnknown || !group.visible) {
+            element.style.visibility = 'hidden';
+            return;
+          }
+          projected.copy(group.position);
+          projected.y = mode === 'surface' ? 1.2 : group.position.y + 1.2;
+          projected.project(camera);
+          const visible = projected.z < 1 && projected.z > -1 && Math.abs(projected.x) < .98 && Math.abs(projected.y) < .9;
+          element.style.visibility = visible ? 'visible' : 'hidden';
+          element.style.transform = `translate(${(projected.x * .5 + .5) * container.clientWidth}px, ${(-projected.y * .5 + .5) * container.clientHeight}px) translate(-50%, -100%)`;
+        });
+      } else {
+        contactMeshes.forEach((group, i) => {
+          const element = labels.get(CONTACTS[i].id); if (!element) return;
+          projected.copy(group.position); projected.y = mode === 'surface' ? 1.2 : group.position.y + 1.2; projected.project(camera);
+          const visible = projected.z < 1 && projected.z > -1 && Math.abs(projected.x) < .98 && Math.abs(projected.y) < .9;
+          element.style.visibility = visible ? 'visible' : 'hidden';
+          element.style.transform = `translate(${(projected.x * .5 + .5) * container.clientWidth}px, ${(-projected.y * .5 + .5) * container.clientHeight}px) translate(-50%, -100%)`;
+        });
+      }
+      labelTime = now;
     }
     renderer.render(scene, camera); frames++;
     if (now - fpsTime >= 1000) {
@@ -606,43 +1014,152 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
   }
   frameId = requestAnimationFrame(frame);
   function setCamera(view: CameraView) {
+    cameraView = view;
+    controls.enabled = view !== 'bridge';
     presetTransition = true;
     isTransitioning = true;
     if (view === 'inspect') {
-      const position = contactMeshes[CONTACTS.findIndex(c => c.id === selected)].position;
-      const targetY = mode === 'surface' ? 0 : position.y;
-      targetLookAt.set(position.x, targetY, position.z);
-      targetCamPos.set(position.x + 5, mode === 'surface' ? targetY + 3 : Math.min(-1.2, targetY + 3), position.z + 7);
+      let pos: THREE.Vector3 | null = null;
+      if (isLiveMode) {
+        const dyn = dynamicMeshes.get(selected);
+        if (dyn && !dyn.contact.locationUnknown) pos = dyn.group.position;
+      } else {
+        const idx = CONTACTS.findIndex(c => c.id === selected);
+        if (idx >= 0) pos = contactMeshes[idx].position;
+      }
+      if (pos) {
+        const targetY = mode === 'surface' ? 0 : pos.y;
+        targetLookAt.set(pos.x, targetY, pos.z);
+        targetCamPos.set(pos.x + 5, mode === 'surface' ? targetY + 3 : Math.min(-1.2, targetY + 3), pos.z + 7);
+      }
     } else if (view === 'bridge') {
-      targetCamPos.set(.1, mode === 'surface' ? 4.4 : -4, -1.5);
-      targetLookAt.set(0, mode === 'surface' ? 1.4 : -9, -45);
+      if (mode !== 'surface') {
+        mode = 'surface';
+        bedMaterial.wireframe = false;
+        bedMaterial.color.set('#ffffff');
+        onModeChange(mode);
+      }
+      updateBridgeTarget();
     } else if (view === 'overhead') {
-      targetCamPos.set(0, mode === 'surface' ? 65 : -1, .1);
-      targetLookAt.set(0, mode === 'surface' ? 0 : -16, 0);
+      const bX = boat.position.x;
+      const bZ = boat.position.z;
+      targetCamPos.set(bX, mode === 'surface' ? 65 : -2, bZ + .1);
+      targetLookAt.set(bX, mode === 'surface' ? 0 : terrainHeight(bX, bZ), bZ);
+    } else if (view === 'seabed') {
+      const bX = boat.position.x;
+      const bZ = boat.position.z;
+      const bedY = terrainHeight(bX, bZ);
+      targetCamPos.set(bX + 16, Math.max(bedY + 5.5, -45), bZ + 16);
+      targetLookAt.set(bX, bedY + 1.2, bZ);
     } else if (mode === 'surface') {
-      targetCamPos.set(26, 12, 33);
-      targetLookAt.set(0, 1, -5);
+      targetCamPos.set(boat.position.x + 26, 12, boat.position.z + 33);
+      targetLookAt.set(boat.position.x, 1, boat.position.z - 5);
     } else {
-      targetCamPos.set(25, -6, 32);
-      targetLookAt.set(0, -12, -4);
+      targetCamPos.set(boat.position.x + 12, -3, boat.position.z + 17);
+      targetLookAt.set(boat.position.x, -5, boat.position.z - 3);
     }
   }
   return {
     setMode(next) {
       mode = next;
-      bedMaterial.wireframe = mode === 'sonar'; bedMaterial.color.set(mode === 'sonar' ? '#51bba0' : '#ffffff');
+      bedMaterial.wireframe = mode === 'sonar';
+      bedMaterial.color.set(mode === 'sonar' ? '#51bba0' : '#ffffff');
       setCamera('orbit');
     },
     setCamera,
     setDepth(depth) { descend(((isTransitioning ? targetCamPos.y : camera.position.y) + depth) / .025); },
-    select(id) { if (CONTACTS.some(c => c.id === id)) selected = id; },
+    select(id) {
+      selected = id;
+    },
     setWaves(value) { waveStrength = THREE.MathUtils.clamp(value, .15, 2); },
     setPaused(value) { paused = value; },
     zoom(amount) {
+      if (cameraView === 'bridge') {
+        cameraView = 'orbit';
+        controls.enabled = true;
+        onNavigate();
+      }
       isTransitioning = false;
       const offset = camera.position.clone().sub(controls.target);
       offset.setLength(THREE.MathUtils.clamp(offset.length() * amount, controls.minDistance, controls.maxDistance));
       camera.position.copy(controls.target).add(offset); controls.update(); constrainView(); camera.lookAt(controls.target);
+    },
+    setLiveMode(active) {
+      isLiveMode = active;
+      boat.visible = true;
+      auv.visible = active;
+      deploymentLine.visible = active;
+      seabed.visible = true;
+      contactMeshes.forEach(m => { m.visible = !active; });
+      dynamicGroup.visible = active;
+      if (!active) {
+        boat.position.set(0, 0, 0);
+        boat.rotation.set(0, 0, 0);
+        vesselPose = { eastM: 0, northM: 0, headingDeg: 0 };
+      }
+    },
+    updateBathymetry(batch) {
+      if (!batch) {
+        surveyCells.clear();
+        return 0;
+      }
+      const size = batch.cellSizeM;
+      if (!Number.isFinite(size) || size <= 0) return surveyCells.size;
+      for (const sample of batch.samples) {
+        if (![sample.eastM, sample.northM, sample.depthM].every(Number.isFinite) || sample.depthM < 0) continue;
+        const key = `${size}:${Math.round(sample.eastM / size)}:${Math.round(sample.northM / size)}`;
+        surveyCells.add(key);
+      }
+      return surveyCells.size;
+    },
+    updateLiveContacts(contacts) {
+      const incoming = new Map(contacts.map(c => [c.id, c]));
+      for (const [id, entry] of dynamicMeshes) {
+        if (!incoming.has(id) || entry.contact.scenarioObjectId !== incoming.get(id)?.scenarioObjectId) {
+          dynamicGroup.remove(entry.group);
+          disposeDynamicContact(entry.group);
+          dynamicMeshes.delete(id);
+        }
+      }
+      for (const c of contacts) {
+        let entry = dynamicMeshes.get(c.id);
+        if (!entry) {
+          const group = buildDynamicContactMesh(c);
+          dynamicGroup.add(group);
+          entry = { group, contact: c, uncertaintyRadius: c.uncertaintyM };
+          dynamicMeshes.set(c.id, entry);
+        } else {
+          entry.contact = c;
+          const ringRadius = Math.max(1.2, Math.min(30, c.uncertaintyM));
+          if (Math.abs(entry.uncertaintyRadius - ringRadius) > 0.3) {
+            entry.uncertaintyRadius = ringRadius;
+            const ring = entry.group.getObjectByName('uncertaintyRing') as THREE.Mesh | undefined;
+            if (ring) {
+              ring.geometry.dispose();
+              ring.geometry = new THREE.RingGeometry(ringRadius - 0.12, ringRadius, 64);
+            }
+          }
+        }
+        const ring = entry.group.getObjectByName('uncertaintyRing') as THREE.Mesh | undefined;
+        if (ring && ring.material instanceof THREE.MeshBasicMaterial) {
+          const isLost = c.status === 'LOST';
+          const isStale = c.status === 'STALE';
+          const accentColor = c.reviewStatus === 'CONFIRMED'
+            ? '#10b981'
+            : c.reviewStatus === 'FALSE_POSITIVE'
+              ? '#ef4444'
+              : isLost
+                ? '#ef4444'
+                : isStale
+                  ? '#f59e0b'
+                  : '#38bdf8';
+          ring.material.color.set(accentColor);
+          ring.material.opacity = isLost ? 0.25 : isStale ? 0.45 : 0.75;
+        }
+      }
+    },
+    updateVesselPose(eastM, northM, headingDeg) {
+      vesselPose = { eastM, northM, headingDeg };
     },
     dispose() {
       disposed = true; cancelAnimationFrame(frameId); observer.disconnect(); controls.dispose();
@@ -657,6 +1174,7 @@ export function createOceanScene(container: HTMLElement, onSelect: (id: string) 
       });
       materials.forEach(material => { Object.values(material).forEach(value => { if (value instanceof THREE.Texture) textures.add(value); }); material.dispose(); });
       textures.forEach(t => t.dispose()); geometries.forEach(g => g.dispose()); environment.dispose();
+      dynamicMeshes.clear();
       renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove(); labels.forEach(label => { label.style.visibility = 'hidden'; });
     },
   };

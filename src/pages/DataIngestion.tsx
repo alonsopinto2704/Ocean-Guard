@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   Camera,
@@ -61,6 +62,7 @@ function ResultSummary({ result }: { result: AIInferenceResult }) {
 // Espada AI & Data page: upload images (drag-drop or picker) for real server-side
 // detection, run live camera inference on a 1.5s loop, and review/annotate frames.
 export default function DataIngestion() {
+  const navigate = useNavigate();
   const [dragging, setDragging] = useState(false);
   const [analyses, setAnalyses] = useState<AnalysisItem[]>([]);
   const [modelStatus, setModelStatus] = useState<AIServiceStatus | null>(null);
@@ -326,6 +328,7 @@ export default function DataIngestion() {
             <div className="rounded border border-[var(--ocean-border)] bg-[var(--ocean-surface)] px-3 py-2 text-[10px] text-[var(--ocean-text-muted)]">
               <span className="font-mono text-[#d7fff3]">{modelStatus?.learning?.framesReviewed ?? 0}</span> frames reviewed · <span className="font-mono text-[#d7fff3]">{modelStatus?.classes.length ?? 0}</span> classes
             </div>
+            <Button size="sm" variant="outline" onClick={() => navigate('/replay')}>Open mission replay</Button>
             <Button size="sm" variant="outline" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => void refreshStatus()}>Refresh</Button>
           </div>
         </div>

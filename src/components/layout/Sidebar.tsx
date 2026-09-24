@@ -142,31 +142,32 @@ export function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
       items: [
         { num: '00', label: 'Public 3D Portal',  path: '/portal',     badge: '3d', special: '3d-globe' },
         { num: '01', label: 'Command Center',     path: '/command' },
-        { num: '02', label: 'Live Monitoring 3D', path: '/monitoring', badge: '3d' },
-        { num: '08', label: 'Sensors & Fleet',   path: '/sensors',    badge: 'fraction', badgeCount: summary?.camerasOnline ?? '—' },
+        { num: '02', label: '3D Monitoring', path: '/monitoring', badge: '3d' },
+        { num: '03', label: 'Mission Replay',     path: '/replay' },
+        { num: '04', label: 'Sensors & Fleet',   path: '/sensors',    badge: 'fraction', badgeCount: summary?.camerasOnline ?? '—' },
       ],
     },
     {
       category: 'Analyze',
       items: [
-        { num: '03', label: 'Debris Detections', path: '/detections', badge: 'count', badgeCount: summary?.debrisDetected !== undefined ? summary.debrisDetected : '—' },
-        { num: '04', label: 'Pollution Hotspots', path: '/hotspots',   badge: 'count', badgeCount: summary?.activeHotspots !== undefined ? summary.activeHotspots : '—' },
-        { num: '05', label: 'Environmental AI',  path: '/ai' },
-        { num: '07', label: 'Espada AI & Data',   path: '/data' },
+        { num: '05', label: 'Debris Detections', path: '/detections', badge: 'count', badgeCount: summary?.debrisDetected !== undefined ? summary.debrisDetected : '—' },
+        { num: '06', label: 'Pollution Hotspots', path: '/hotspots',   badge: 'count', badgeCount: summary?.activeHotspots !== undefined ? summary.activeHotspots : '—' },
+        { num: '07', label: 'Environmental AI',  path: '/ai' },
+        { num: '08', label: 'Espada AI & Data',   path: '/data' },
       ],
     },
     {
       category: 'Respond',
       items: [
-        { num: '06', label: 'Cleanup Missions',  path: '/cleanup',    badge: 'count', badgeCount: summary?.cleanupMissions !== undefined ? summary.cleanupMissions : '—' },
-        { num: '09', label: 'Reports & Export',  path: '/reports' },
+        { num: '09', label: 'Cleanup Missions',  path: '/cleanup',    badge: 'count', badgeCount: summary?.cleanupMissions !== undefined ? summary.cleanupMissions : '—' },
+        { num: '10', label: 'Reports & Export',  path: '/reports' },
       ],
     },
     {
       category: 'Admin',
       items: [
-        { num: '10', label: 'Admin Governance',  path: '/admin',      badge: 'admin', adminOnly: true },
-        { num: '11', label: 'System Settings',   path: '/settings' },
+        { num: '11', label: 'Admin Governance',  path: '/admin',      badge: 'admin', adminOnly: true },
+        { num: '12', label: 'System Settings',   path: '/settings' },
       ],
     },
   ];

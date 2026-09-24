@@ -20,3 +20,18 @@ ai_service/models/.candidate-*/
 pnpm.exe
 .env*
 !.env.example
+
+# Local API smoke output and credentials
+cookies.txt
+token.txt
+login.json
+abort.json
+detect_test*.json
+events.json
+rec.json
+replays.json
+run.json
+runid.txt
+data-smoke/
+test_frame*.jpg
+Screenshot *.png

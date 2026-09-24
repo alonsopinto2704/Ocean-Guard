@@ -1,7 +1,8 @@
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { storage, StoredUser } from './src/server/storage.js';
+import { storage, StoredUser, type StoredDetection } from './src/server/storage.js';
+import { simulationRouter, sourceModes } from './src/server/simulation.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -10,6 +11,12 @@ const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').r
 const ESPADA_SERVICE_TOKEN = process.env.ESPADA_SERVICE_TOKEN || '';
 const SESSION_SECRET = process.env.OCEANGUARD_SESSION_SECRET || '';
 const PUBLIC_AI_UNAVAILABLE = 'Espada is temporarily unavailable. Image analysis is paused. Please try again shortly.';
+
+
+/** Evidence mode (OCEANGUARD_EVIDENCE_MODE=true): fabricated/sample operational
+ *  values are replaced with null/UNAVAILABLE so nothing in the API can be
+ *  mistaken for a measured result. */
+const EVIDENCE_MODE = (process.env.OCEANGUARD_EVIDENCE_MODE || '').toLowerCase() === 'true';
 
 function positiveTimeout(name: string, fallback: number) {
   const configured = Number(process.env[name]);
@@ -20,7 +27,9 @@ const AI_REQUEST_TIMEOUT_MS = positiveTimeout('AI_SERVICE_REQUEST_TIMEOUT_MS', 6
 const AI_DETECT_TIMEOUT_MS = positiveTimeout('AI_SERVICE_DETECT_TIMEOUT_MS', 60000);
 
 function createSignedSession(user: StoredUser) {
-  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  // 24 h matches the storage-backed session lifetime and the documented
+  // "24H EXPIRY" claim on the login screen.
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const payload = Buffer.from(JSON.stringify({ sub: user.id, exp: expiresAt })).toString('base64url');
   const signature = createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return { token: `${payload}.${signature}`, expiresAt };
@@ -133,6 +142,12 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
+// Simulation & Replay Engine
+app.use('/api/simulation', requireApiUser(ALL_ROLES), simulationRouter);
+app.get('/api/source-modes', (_req: Request, res: Response) => {
+  res.json(sourceModes());
+});
+
 // SSE
 app.get('/api/events', (req: Request, res: Response) => {
   if (process.env.VERCEL) {
@@ -210,6 +225,39 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
   res.json({ user: sanitizeUser(user) });
 });
 
+// Operator profile update: persisted to storage so a reload retains saved values.
+app.patch('/api/auth/profile', (req: Request, res: Response) => {
+  const authorization = req.headers.authorization || '';
+  const token = authorization.replace(/^Bearer\s+/i, '').trim();
+  const user = token ? findSessionUser(token) : undefined;
+  if (!user || user.status !== 'ACTIVE') {
+    res.status(401).json({ message: 'Invalid or expired session' });
+    return;
+  }
+
+  const name = typeof req.body.name === 'string' ? req.body.name.trim() : undefined;
+  const organizationName = typeof req.body.organizationName === 'string' ? req.body.organizationName.trim() : undefined;
+  if ((name !== undefined && (name.length < 2 || name.length > 80)) ||
+      (organizationName !== undefined && (organizationName.length < 2 || organizationName.length > 120))) {
+    res.status(400).json({ message: 'Name and organization must be 2–120 characters.' });
+    return;
+  }
+  if (name === undefined && organizationName === undefined) {
+    res.status(400).json({ message: 'Nothing to update.' });
+    return;
+  }
+
+  const updated = storage.updateUser(user.id, {
+    ...(name !== undefined ? { name } : {}),
+    ...(organizationName !== undefined ? { organizationName } : {}),
+  }, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: 'Profile not found.' });
+    return;
+  }
+  res.json({ user: sanitizeUser(updated) });
+});
+
 // Account recovery & password reset
 app.post('/api/auth/recover', (_req: Request, res: Response) => {
   // Recovery needs a verified delivery channel; never return reset tokens publicly.
@@ -283,17 +331,22 @@ app.get('/api/dashboard/summary', async (_req: Request, res: Response) => {
   });
 });
 
+// Sample trend series for UI development. In evidence mode these are withheld
+// so no fabricated series can be mistaken for measured operational data.
+const SAMPLE_TREND_HISTORY = [
+  { date: 'Aug 24', plastic: 142, fishingGear: 48, metalGlass: 28, other: 14 },
+  { date: 'Aug 25', plastic: 168, fishingGear: 52, metalGlass: 31, other: 19 },
+  { date: 'Aug 26', plastic: 155, fishingGear: 60, metalGlass: 29, other: 16 },
+  { date: 'Aug 27', plastic: 184, fishingGear: 74, metalGlass: 34, other: 22 },
+  { date: 'Aug 28', plastic: 190, fishingGear: 82, metalGlass: 38, other: 25 },
+  { date: 'Aug 29', plastic: 215, fishingGear: 94, metalGlass: 42, other: 28 },
+  { date: 'Aug 30', plastic: 232, fishingGear: 104, metalGlass: 46, other: 30 },
+];
+
 app.get('/api/dashboard/trends', (_req: Request, res: Response) => {
   res.json({
-    history: [
-      { date: 'Aug 24', plastic: 142, fishingGear: 48, metalGlass: 28, other: 14 },
-      { date: 'Aug 25', plastic: 168, fishingGear: 52, metalGlass: 31, other: 19 },
-      { date: 'Aug 26', plastic: 155, fishingGear: 60, metalGlass: 29, other: 16 },
-      { date: 'Aug 27', plastic: 184, fishingGear: 74, metalGlass: 34, other: 22 },
-      { date: 'Aug 28', plastic: 190, fishingGear: 82, metalGlass: 38, other: 25 },
-      { date: 'Aug 29', plastic: 215, fishingGear: 94, metalGlass: 42, other: 28 },
-      { date: 'Aug 30', plastic: 232, fishingGear: 104, metalGlass: 46, other: 30 },
-    ],
+    history: EVIDENCE_MODE ? [] : SAMPLE_TREND_HISTORY,
+    dataProvenance: EVIDENCE_MODE ? 'UNAVAILABLE' : 'SAMPLE',
   });
 });
 
@@ -309,17 +362,20 @@ app.get('/api/dashboard/system-health', async (_req: Request, res: Response) => 
   const cameras = storage.getCameras();
   const activeCameras = cameras.filter(c => c.status === 'STREAMING' || c.status === 'ONLINE').length;
 
+  // Only cameras/AI/internet reflect actual observed state. GPS, fleet FPS and
+  // uptime have no real sensor or measurement behind them in this prototype, so
+  // they are withheld instead of fabricated (evidence-truthfulness rule).
   res.json({
     system: 'ONLINE',
     camera: activeCameras > 0 ? 'STREAMING' : 'NO_SIGNAL',
     ai,
-    gps: 'VALID',
+    gps: 'UNAVAILABLE',
     internet: 'ONLINE',
     activeCameras,
     totalCameras: cameras.length,
     aiLatencyMs,
-    fps: 29.8,
-    uptime: '99.7%',
+    fps: null,
+    uptime: null,
   });
 });
 
@@ -347,9 +403,20 @@ app.get('/api/monitoring/cameras/:id', (req: Request, res: Response) => {
   res.json(cam);
 });
 
+/** Operators may only change camera connectivity; identity, position and
+ *  telemetry fields are recorded, not operator-editable. */
+const CAMERA_MUTABLE_FIELDS = new Set(['status']);
+
 app.patch('/api/monitoring/cameras/:id', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const updates = Object.fromEntries(
+    Object.entries(req.body ?? {}).filter(([key]) => CAMERA_MUTABLE_FIELDS.has(key)),
+  );
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ message: 'No editable camera fields supplied. Only status may be updated.' });
+    return;
+  }
   const user = res.locals.authenticatedUser as StoredUser;
-  const updated = storage.updateCamera(req.params.id, req.body, { id: user.id, email: user.email });
+  const updated = storage.updateCamera(req.params.id, updates, { id: user.id, email: user.email });
   if (!updated) {
     res.status(404).json({ message: `Camera ${req.params.id} not found.` });
     return;
@@ -372,9 +439,20 @@ app.get('/api/devices/:id', (req: Request, res: Response) => {
   res.json(d);
 });
 
+/** Device identity, position and firmware are recorded inventory data; the
+ *  operator may only flip operational status. */
+const DEVICE_MUTABLE_FIELDS = new Set(['status']);
+
 app.patch('/api/devices/:id', requireApiUser(ALL_ROLES), (req: Request, res: Response) => {
+  const updates = Object.fromEntries(
+    Object.entries(req.body ?? {}).filter(([key]) => DEVICE_MUTABLE_FIELDS.has(key)),
+  );
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ message: 'No editable device fields supplied. Only status may be updated.' });
+    return;
+  }
   const user = res.locals.authenticatedUser as StoredUser;
-  const updated = storage.updateDevice(req.params.id, req.body, { id: user.id, email: user.email });
+  const updated = storage.updateDevice(req.params.id, updates, { id: user.id, email: user.email });
   if (!updated) {
     res.status(404).json({ message: `Device ${req.params.id} not found.` });
     return;
@@ -410,36 +488,51 @@ app.get('/api/detections/:id/track', (req: Request, res: Response) => {
   }
   const points = d.trackPoints && d.trackPoints.length > 0
     ? d.trackPoints
-    : [
-        { lat: d.lat - 0.02, lng: d.lng + 0.02, timestamp: new Date(Date.now() - 35 * 60000).toISOString(), confidence: 87 },
-        { lat: d.lat - 0.01, lng: d.lng + 0.01, timestamp: new Date(Date.now() - 20 * 60000).toISOString(), confidence: 88 },
-        { lat: d.lat, lng: d.lng, timestamp: d.detectedAt, confidence: d.confidence },
-      ];
+    : [{ lat: d.lat, lng: d.lng, timestamp: d.detectedAt, confidence: d.confidence }];
 
   res.json({
     id: d.trackId,
     detectionId: d.id,
     className: d.className,
-    status: 'ACTIVE',
+    status: d.status,
     firstSeen: points[0].timestamp,
     lastSeen: points[points.length - 1].timestamp,
     currentLat: d.lat,
     currentLng: d.lng,
-    velocity: 0.4,
-    heading: 320,
+    velocity: null,
+    heading: null,
     confidence: d.confidence,
     points,
   });
 });
 
+const DETECTION_STATUSES: ReadonlySet<string> = new Set(['NEW', 'VALIDATING', 'CONFIRMED', 'TRACKING', 'LOST', 'FALSE_POSITIVE', 'EXPIRED']);
+const isDetectionStatus = (value: unknown): value is StoredDetection['status'] => typeof value === 'string' && DETECTION_STATUSES.has(value);
+
 app.patch('/api/detections/:id/status', requireApiUser(ESPADA_REVIEW_ROLES), (req: Request, res: Response) => {
   const status = req.body.status;
-  if (!status) {
-    res.status(400).json({ message: 'Status is required.' });
+  if (!isDetectionStatus(status)) {
+    res.status(400).json({ message: 'Status must be one of: NEW, VALIDATING, CONFIRMED, TRACKING, LOST, FALSE_POSITIVE, EXPIRED.' });
     return;
   }
   const user = res.locals.authenticatedUser as StoredUser;
   const updated = storage.updateDetectionStatus(req.params.id, status, { id: user.id, email: user.email });
+  if (!updated) {
+    res.status(404).json({ message: `Detection ${req.params.id} not found.` });
+    return;
+  }
+  broadcastEvent('DETECTION_UPDATE', updated);
+  res.json(updated);
+});
+
+app.patch('/api/detections/:id/origin', requireApiUser(ESPADA_REVIEW_ROLES), (req: Request, res: Response) => {
+  const label = req.body?.label;
+  if (!['NATURAL', 'MAN_MADE', 'UNCERTAIN'].includes(label)) {
+    res.status(400).json({ message: 'Choose Natural, Man-made, or Uncertain.' });
+    return;
+  }
+  const user = res.locals.authenticatedUser as StoredUser;
+  const updated = storage.reviewDetectionOrigin(req.params.id, label, { id: user.id, email: user.email });
   if (!updated) {
     res.status(404).json({ message: `Detection ${req.params.id} not found.` });
     return;
@@ -554,6 +647,11 @@ app.post('/api/cleanup/missions/:id/evidence', requireApiUser(CLEANUP_MANAGE_ROL
 // live PATCH handler by skipping the DEVICE_UPDATE SSE broadcast.
 // It has been removed; the authoritative handlers live in the earlier block.
 
+// ── Mission simulation & replay (isolated from operational storage) ─────────
+// Registered once, with the other API mounts near the top of this file. Runs
+// live in module-local memory with SIM-RUN- ids; simulation frames carry
+// X-Espada-Skip-Learning so no training data can be created from them.
+
 // ── AI Models ────────────────────────────────────────────────────────────────
 /** Proxy a request to the Espada inference service with per-route timeouts,
  *  normalizing FastAPI validation errors into readable messages. */
@@ -605,7 +703,7 @@ async function fetchAiJson(pathname: string, init?: RequestInit) {
   return payload;
 }
 
-function offlineModelStatus(error: unknown) {
+function offlineModelStatus(_error: unknown) {
   return {
     state: 'OFFLINE',
     ready: false,
@@ -737,8 +835,9 @@ app.get('/api/analytics/overview', (_req: Request, res: Response) => {
     totalDetections: detections.length,
     criticalAlerts: storage.getAlerts().filter(a => a.priority === 'CRITICAL').length,
     activeMissions: missions.filter(m => m.status === 'IN_PROGRESS' || m.status === 'ASSIGNED').length,
-    clearedKg: clearedKg || 2840,
-    responseTimeH: 1.8,
+    // No fabricated fallback: zero evidence reports zero, not an invented 2840 kg.
+    clearedKg,
+    responseTimeH: null,
     aiAccuracy: null,
   });
 });
@@ -789,6 +888,14 @@ app.get('/api/reports/:id', requireApiUser(REPORT_GENERATE_ROLES), (req: Request
 
 app.post('/api/reports/generate', requireApiUser(REPORT_GENERATE_ROLES), (req: Request, res: Response) => {
   const { type = 'DAILY', zoneId = 'ALL', startDate, endDate } = req.body;
+  const validDate = (value: unknown) => value === undefined || (
+    typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value
+  );
+  if (!validDate(startDate) || !validDate(endDate) || (startDate && endDate && startDate > endDate)) {
+    res.status(400).json({ message: 'Choose valid start and end dates in chronological order.' });
+    return;
+  }
   const user = res.locals.authenticatedUser as StoredUser;
   const report = storage.createReport(
     { type, zoneId, startDate, endDate },
@@ -806,9 +913,21 @@ app.get('/api/reports/:id/download', requireApiUser(ALL_ROLES), (req: Request, r
   const format = String(req.query.format || 'json').toLowerCase();
 
   if (format === 'csv') {
+    const csv = (value: unknown) => {
+      const cell = String(value ?? '');
+      return `"${(/^[\s]*[=+\-@]/.test(cell) ? "'" : '') + cell.replace(/"/g, '""')}"`;
+    };
     const csvContent = [
       'Report ID,Type,Zone,Generated At,Generated By,Total Detections,Critical Incidents,Cleared Debris (kg),Mean Response (h),Predominant Class',
-      `"${r.id}","${r.type}","${r.zoneId}","${r.generatedAt}","${r.generatedBy}",${r.metrics.totalDetectionsPeriod},${r.metrics.criticalIncidents},${r.metrics.clearedDebrisKg},${r.metrics.meanResponseTimeHours},"${r.metrics.predominantClass}"`,
+      [r.id, r.type, r.zoneId, r.generatedAt, r.generatedBy, r.metrics.totalDetectionsPeriod,
+        r.metrics.criticalIncidents, r.metrics.clearedDebrisKg, r.metrics.meanResponseTimeHours,
+        r.metrics.predominantClass].map(csv).join(','),
+      '',
+      'Detection ID,Detected At,Class,Origin Assessment,Origin Source,Confidence (%),Latitude,Longitude,Location,Box X (fraction),Box Y (fraction),Box Width (fraction),Box Height (fraction),Estimated Size (unverified),Source,Status,Provenance',
+      ...(r.anomalies ?? []).map(a => [a.detectionId, a.detectedAt, a.className, a.originAssessment,
+        a.originAssessmentSource, a.confidencePercent, a.location.latitude, a.location.longitude, a.location.label,
+        a.boundingBoxNormalized?.x, a.boundingBoxNormalized?.y, a.boundingBoxNormalized?.width,
+        a.boundingBoxNormalized?.height, a.estimatedSize, a.source, a.status, a.provenance].map(csv).join(',')),
     ].join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -819,6 +938,7 @@ app.get('/api/reports/:id/download', requireApiUser(ALL_ROLES), (req: Request, r
 
   if (format === 'pdf' || format === 'html') {
     const escapeHtml = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+    const anomalyRows = (r.anomalies ?? []).map(a => `<tr><td>${escapeHtml(a.detectionId)}</td><td>${escapeHtml(a.className)}</td><td>${escapeHtml(a.confidencePercent)}%</td><td>${escapeHtml(a.location.latitude)}, ${escapeHtml(a.location.longitude)}</td><td>${a.boundingBoxNormalized ? escapeHtml(`${a.boundingBoxNormalized.x}, ${a.boundingBoxNormalized.y}, ${a.boundingBoxNormalized.width}, ${a.boundingBoxNormalized.height}`) : 'Unknown'}</td><td>${escapeHtml(a.originAssessment)}</td></tr>`).join('');
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -835,6 +955,9 @@ app.get('/api/reports/:id/download', requireApiUser(ALL_ROLES), (req: Request, r
     .card-val { font-size: 24px; font-weight: bold; color: #0891b2; margin-top: 4px; }
     .summary { line-height: 1.6; color: #334155; margin-bottom: 24px; }
     .footer { font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 24px; }
+    th, td { padding: 7px; border: 1px solid #e2e8f0; text-align: left; }
+    th { background: #f8fafc; }
   </style>
 </head>
 <body>
@@ -847,12 +970,15 @@ app.get('/api/reports/:id/download', requireApiUser(ALL_ROLES), (req: Request, r
     <div class="card"><div class="card-label">Total Detections</div><div class="card-val">${escapeHtml(r.metrics.totalDetectionsPeriod)}</div></div>
     <div class="card"><div class="card-label">Critical Incidents</div><div class="card-val">${escapeHtml(r.metrics.criticalIncidents)}</div></div>
     <div class="card"><div class="card-label">Cleared Debris</div><div class="card-val">${escapeHtml(r.metrics.clearedDebrisKg)} kg</div></div>
-    <div class="card"><div class="card-label">Mean Response Time</div><div class="card-val">${escapeHtml(r.metrics.meanResponseTimeHours)} hrs</div></div>
+    <div class="card"><div class="card-label">Mean Response Time</div><div class="card-val">${r.metrics.meanResponseTimeHours === null ? 'Unavailable' : `${escapeHtml(r.metrics.meanResponseTimeHours)} hrs`}</div></div>
   </div>
   <h3>Operational Summary</h3>
   <p class="summary">${escapeHtml(r.summaryText)}</p>
   <p class="summary"><strong>Predominant Pollutant Class:</strong> ${escapeHtml(r.metrics.predominantClass)}</p>
-  <div class="footer">OceanGuard AI Platform — Self-Hosted Ecological Telemetry — UN SDG 14 Compliant</div>
+  <h3>Structured anomaly evidence</h3>
+  <p class="meta">Coordinates are stored record locations. Image boxes are normalized fractions (x, y, width, height), not physical dimensions. Estimated size is unverified. All listed records are prototype data; natural/man-made origin, when set, is an operator assessment.</p>
+  <table><thead><tr><th>ID</th><th>Class</th><th>Confidence</th><th>Location (lat, lon)</th><th>Image box</th><th>Origin</th></tr></thead><tbody>${anomalyRows || '<tr><td colspan="6">No matching detection records</td></tr>'}</tbody></table>
+  <div class="footer">OceanGuard AI Platform — Self-Hosted Ecological Telemetry — Supports UN SDG 14 (Life Below Water)</div>
 </body>
 </html>`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -915,7 +1041,7 @@ app.patch('/api/admin/users/:id', requireApiUser(ADMIN_ROLES), (req: Request, re
   res.json(sanitizeUser(updated));
 });
 
-app.get('/api/admin/thresholds', (_req: Request, res: Response) => {
+app.get('/api/admin/thresholds', requireApiUser(ALL_ROLES), (_req: Request, res: Response) => {
   res.json({ thresholds: storage.getThresholds() });
 });
 
@@ -983,7 +1109,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    const vite = await createViteServer({ configLoader: 'runner', server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');

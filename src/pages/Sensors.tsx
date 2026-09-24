@@ -146,8 +146,8 @@ export default function Sensors() {
         {[
           { l: 'Optical Stream Fleet', v: `${onlineCameras}/${cameras.length}`, c: '#00d4ff', sub: 'Coastal array' },
           { l: 'Telemetry Nodes', v: `${onlineDevices}/${devices.length}`, c: '#00ff88', sub: 'UAV, GPS, Radar, AIS' },
-          { l: 'Coverage Sectors', v: '7 Sectors', c: '#ffaa00', sub: 'Arabian Sea & Bengal' },
-          { l: 'Mesh Health', v: onlineCameras >= 12 ? 'NOMINAL' : 'DEGRADED', c: onlineCameras >= 12 ? '#00ff88' : '#ffaa00', sub: 'Real-time telemetry' },
+          { l: 'Coverage Sectors', v: `${new Set(devices.map(d => d.location)).size} sites`, c: '#ffaa00', sub: 'Prototype fleet records' },
+          { l: 'Mesh Health', v: onlineCameras === cameras.length && cameras.length > 0 ? 'NOMINAL' : 'DEGRADED', c: onlineCameras === cameras.length && cameras.length > 0 ? '#00ff88' : '#ffaa00', sub: 'Recorded device status' },
         ].map(s => (
           <Card key={s.l} className="py-3 px-4">
             <p className="text-xs text-[var(--ocean-text-dim)] mb-1">{s.l}</p>
@@ -162,12 +162,12 @@ export default function Sensors() {
         <div className="flex items-center justify-between px-4 pt-4 mb-2">
           <CardHeader
             title="Coastal Optical Sensor Network"
-            subtitle={`${onlineCameras}/${cameras.length} cameras actively streaming high-res feeds`}
+            subtitle={`${onlineCameras}/${cameras.length} prototype cameras recorded as streaming — no physical stream is connected`}
             icon={<Camera className="w-4 h-4 text-cyan-400" />}
             className="mb-0"
           />
           <div className="flex items-center gap-2">
-            <Badge variant={onlineCameras >= 12 ? 'green' : 'amber'} size="xs">
+            <Badge variant={onlineCameras === cameras.length && cameras.length > 0 ? 'green' : 'amber'} size="xs">
               {onlineCameras}/{cameras.length} ONLINE
             </Badge>
             <Button
@@ -395,9 +395,10 @@ export default function Sensors() {
                   variant="primary"
                   size="sm"
                   loading={savingConfig}
+                  title="Marks this demo camera as streaming in the operational records. No physical camera is contacted."
                   onClick={() => handleUpdateCameraStatus('STREAMING')}
                 >
-                  Force Reconnect Stream
+                  Mark as Streaming (Demo Status)
                 </Button>
               </div>
             </div>
@@ -479,9 +480,10 @@ export default function Sensors() {
                   variant="primary"
                   size="sm"
                   loading={savingConfig}
+                  title="Marks this demo device as online in the operational records. No physical device is contacted."
                   onClick={() => handleUpdateDeviceStatus('ONLINE')}
                 >
-                  Send Keepalive Ping
+                  Mark as Online (Demo Status)
                 </Button>
               </div>
             </div>

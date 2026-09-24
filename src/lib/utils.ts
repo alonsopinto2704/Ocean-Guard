@@ -113,17 +113,21 @@ export function formatRelativeTime(dateStr: string): string {
   return `${diffDay}d ago`;
 }
 
-/** Locale timestamp like "Sep 19, 14:32" for tables and HUD lines. */
+/** Locale timestamp like "19 Sep, 14:32 IST" for tables and HUD lines.
+ *  Uses en-IN locale with Asia/Kolkata (IST, UTC+5:30) time zone. */
 export function formatDateTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleString('en-US', {
-    month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit'
-  });
+  return new Date(dateStr).toLocaleString('en-IN', {
+    month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
+  }) + ' IST';
 }
 
-/** Locale date only, e.g. "Sep 19, 2026", for report listings. */
+/** Locale date only, e.g. "19 Sep 2026", for report listings.
+ *  Uses en-IN locale; dates are displayed in IST where relevant. */
 export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    year: 'numeric', month: 'short', day: '2-digit'
+  return new Date(dateStr).toLocaleDateString('en-IN', {
+    year: 'numeric', month: 'short', day: '2-digit',
+    timeZone: 'Asia/Kolkata',
   });
 }
 

@@ -41,6 +41,11 @@ export const authApi = {
     }),
   logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
   me: () => request<{ user: User }>('/auth/me'),
+  updateProfile: (data: { name?: string; organizationName?: string }) =>
+    request<{ user: User }>('/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   recover: (email: string) =>
     request<{ success: boolean; message: string; resetToken?: string }>('/auth/recover', {
       method: 'POST',
@@ -96,6 +101,11 @@ export const detectionsApi = {
     request<Detection>(`/detections/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+  reviewOrigin: (id: string, label: 'NATURAL' | 'MAN_MADE' | 'UNCERTAIN') =>
+    request<Detection>(`/detections/${id}/origin`, {
+      method: 'PATCH',
+      body: JSON.stringify({ label }),
     }),
 };
 
@@ -205,7 +215,7 @@ export const reportsApi = {
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }));
-      throw new Error(error.message || 'We could not save this review. Your changes are still here—please try again.');
+      throw new Error(error.message || 'Report download failed. Please try again.');
     }
     return response;
   },

@@ -82,6 +82,35 @@ class EspadaCoreTests(unittest.TestCase):
         )
         self.assertAlmostEqual(calibrated, 0.64)
 
+    def test_inference_filters_low_and_invalid_scores(self) -> None:
+        import numpy as np
+
+        detector = MarineDebrisDetector()
+        self.assertTrue(detector.ready)
+        detector.threshold = 0.35
+        detector.calibration_bins = []
+        detector.session = SimpleNamespace(run=lambda *_: (
+            np.array([[10, 10, 50, 50]] * 3),
+            np.array([0.2, 0.8, np.nan]),
+            np.array([1, 1, 1]),
+        ))
+        detector.input_name = 'images'
+        image = io.BytesIO()
+        Image.new('RGB', (64, 64), 'blue').save(image, format='PNG')
+        with patch.object(detector, '_refresh_if_promoted'):
+            result = detector.predict(image.getvalue(), 'test.png')
+        self.assertEqual(len(result['detections']), 1)
+        self.assertEqual(result['detections'][0]['rawConfidence'], 80.0)
+
+    def test_health_fails_when_detector_is_unready(self) -> None:
+        from fastapi import HTTPException
+        from ai_service.app import main
+
+        with patch.object(main.detector, 'status', return_value={'ready': False, 'state': 'ERROR'}):
+            with self.assertRaises(HTTPException) as error:
+                main.health()
+        self.assertEqual(error.exception.status_code, 503)
+
     def test_bootstrap_finds_a_contrasting_debris_candidate(self) -> None:
         image = Image.new("RGB", (320, 220), (28, 116, 158))
         draw = ImageDraw.Draw(image)

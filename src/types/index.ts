@@ -28,13 +28,16 @@ export interface SystemHealth {
   system: SystemStatus;
   camera: string;
   ai: AIStatus;
+  /** No GPS receiver is connected in this prototype: expect 'UNAVAILABLE'. */
   gps: string;
   internet: string;
   activeCameras: number;
   totalCameras: number;
   aiLatencyMs: number;
-  fps: number;
-  uptime?: string;
+  /** No fleet-wide FPS measurement exists; null means "not measured". */
+  fps: number | null;
+  /** No measured uptime source exists; null means "not measured". */
+  uptime?: string | null;
 }
 
 // ─── Cameras & Devices ───────────────────────────────────────────────────────
@@ -114,6 +117,7 @@ export interface Detection {
   confirmedAt?: string;
   frameUrl?: string;
   source: 'CAMERA' | 'DRONE' | 'UPLOAD' | 'MANUAL';
+  originReview?: { label: 'NATURAL' | 'MAN_MADE' | 'UNCERTAIN'; reviewedAt: string; reviewedBy: string };
 }
 
 export interface RiskFactor {

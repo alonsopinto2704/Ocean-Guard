@@ -102,7 +102,7 @@ export default function Login() {
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#161c28] border border-[#3a4a46]/50 mb-3">
               <span className="h-1.5 w-1.5 rounded-full bg-[#00f5d4] pulse-dot" />
               <span className="font-telemetry-tag text-[9px] uppercase tracking-widest text-[#00f5d4] font-bold">
-                DEFENSE-GRADE ECOLOGICAL TELEMETRY
+                SIMULATION & PROTOTYPE ACCESS
               </span>
             </div>
 
@@ -110,17 +110,17 @@ export default function Login() {
               Ocean<span className="text-[#00f5d4]">Guard</span> AI
             </h1>
             <p className="font-body-md text-[#b9cac4] text-base mb-8 leading-relaxed">
-              Sub-millimeter autonomous spatial intelligence & neural computer vision combating marine debris across coastal watch zones.
+              Explore simulated AUV surveys, saved mission replays, and marine debris image analysis when Espada is connected.
             </p>
 
             {/* Feature list */}
             <div className="space-y-1">
               {[
-                { icon: <Target className="h-4 w-4" />, text: 'Real-time AI debris target acquisition & tracking' },
-                { icon: <Satellite className="h-4 w-4" />, text: 'Camera & aerial drone telemetry monitoring' },
-                { icon: <Map className="h-4 w-4" />, text: 'Thermodynamic gyre circulation & hotspot clustering' },
-                { icon: <Rocket className="h-4 w-4" />, text: 'Automated retrieval & cleanup mission coordination' },
-                { icon: <Activity className="h-4 w-4" />, text: 'Empirical environmental impact & verified recovery records' },
+                { icon: <Target className="h-4 w-4" />, text: 'Simulated AUV survey and event-based replay' },
+                { icon: <Satellite className="h-4 w-4" />, text: 'Synthetic camera frames and sonar floor samples' },
+                { icon: <Map className="h-4 w-4" />, text: 'Prototype debris and hotspot dashboards' },
+                { icon: <Rocket className="h-4 w-4" />, text: 'Demo cleanup mission coordination' },
+                { icon: <Activity className="h-4 w-4" />, text: 'Image review with a connected Espada service' },
               ].map(f => (
                 <div key={f.text} className="flex items-center gap-3 text-left py-1.5 px-3 rounded bg-[#161c28]/40 border border-[#3a4a46]/20">
                   <span className="text-[#4cd6fb]" aria-hidden="true">{f.icon}</span>
@@ -135,12 +135,12 @@ export default function Login() {
                 <span className="text-[#83948f] font-telemetry-tag uppercase">System Status</span>
                 <span className="flex items-center gap-1.5 text-[#00f5d4] font-bold">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#00f5d4] pulse-dot inline-block shadow-[0_0_6px_#00f5d4]" />
-                  ONLINE // TELEMETRY SYNCED
+                  WEBSITE DEMO AVAILABLE
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs font-mono mt-2">
                 <span className="text-[#83948f] font-telemetry-tag uppercase">AI Engine</span>
-                <span className="text-[#00f5d4] font-bold">ESPADA V1 · SELF-HOSTED</span>
+                <span className="text-[#00f5d4] font-bold">ESPADA V1 · SEPARATE SERVICE</span>
               </div>
               <div className="flex items-center justify-between text-xs font-mono mt-2">
                 <span className="text-[#83948f] font-telemetry-tag uppercase">Session Security</span>

@@ -16,6 +16,7 @@ const EnvironmentalAI= lazy(() => import('./pages/EnvironmentalAI'));
 const Cleanup        = lazy(() => import('./pages/Cleanup'));
 const CleanupDetail  = lazy(() => import('./pages/CleanupDetail'));
 const DataIngestion  = lazy(() => import('./pages/DataIngestion'));
+const MissionReplay  = lazy(() => import('./pages/MissionReplay'));
 const Sensors        = lazy(() => import('./pages/Sensors'));
 const Reports        = lazy(() => import('./pages/Reports'));
 const Admin          = lazy(() => import('./pages/Admin'));
@@ -49,7 +50,11 @@ export default function App() {
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
           <Route path="/command"    element={<CommandCenter />} />
           <Route path="/monitoring" element={<Monitoring />} />
-          <Route path="/sonar-3d"   element={<Navigate to="/monitoring" replace />} />
+          {/* Legacy demo routes: the standalone demo page was removed; the main
+              monitoring workspace is the single 3D survey surface. */}
+          <Route path="/demo-3d"         element={<Navigate to="/monitoring" replace />} />
+          <Route path="/monitoring-demo" element={<Navigate to="/monitoring" replace />} />
+          <Route path="/sonar-3d"        element={<Navigate to="/monitoring" replace />} />
           <Route path="/detections" element={<Detections />} />
           <Route path="/detections/:id" element={<DetectionDetail />} />
           <Route path="/hotspots"   element={<Hotspots />} />
@@ -57,6 +62,7 @@ export default function App() {
           <Route path="/cleanup"    element={<Cleanup />} />
           <Route path="/cleanup/:id" element={<CleanupDetail />} />
           <Route path="/data"       element={<DataIngestion />} />
+          <Route path="/replay"     element={<MissionReplay />} />
           <Route path="/sensors"    element={<Sensors />} />
           <Route path="/ai-models"  element={<Navigate to="/data" replace />} />
           <Route path="/reports"    element={<Reports />} />

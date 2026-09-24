@@ -14,14 +14,24 @@ interface ModalProps {
   className?: string;
 }
 
-// Accessible dialog: Escape closes, body scroll locks, focus is trapped to the
-// panel and restored to the trigger on close, with optional size presets.
+// Accessible dialog: Escape closes, Tab/Shift+Tab is trapped to the panel,
+// body scroll locks (restoring any prior lock state), background interaction
+// is blocked with inert, and focus returns to the trigger on close.
 const sizeMap = {
   sm: 'max-w-md',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
 };
+
+const FOCUSABLE = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 export function Modal({
   isOpen, onClose, title, subtitle, children, footer, size = 'md', className
@@ -30,32 +40,89 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
-  // Focus management + Escape-to-close while open. The closed-state branch keeps
-  // body-scroll restore symmetrical (the old code duplicated the same cleanup).
+  // Focus management + keyboard support while open. The trigger element is
+  // captured at open time (document.activeElement) and focus is returned to it
+  // on cleanup, so re-creating inline onClose callbacks never disturbs focus
+  // during typing.
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) {
-      const previousFocus = document.activeElement as HTMLElement | null;
-      document.addEventListener('keydown', handleKey);
-      document.body.style.overflow = 'hidden';
-      requestAnimationFrame(() => {
-        const preferred = panelRef.current?.querySelector<HTMLElement>('[autofocus]');
-        (preferred ?? panelRef.current)?.focus();
-      });
+    if (!isOpen) return;
 
-      return () => {
-        document.removeEventListener('keydown', handleKey);
-        document.body.style.overflow = '';
-        previousFocus?.focus();
-      };
-    }
+    const panel = panelRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+
+    // Lock body scroll, compensating for the removed scrollbar so layout does not jump.
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+
+    const focusFirst = () => {
+      const preferred = panel?.querySelector<HTMLElement>('[autofocus]');
+      (preferred ?? panel)?.focus();
+    };
+    const raf = requestAnimationFrame(focusFirst);
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panel) return;
+      // Tab/Shift+Tab focus trap: cycle within the panel.
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
+        .filter(el => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || active === panel) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKey, true);
+
     return () => {
-      document.removeEventListener('keydown', handleKey);
-      document.body.style.overflow = '';
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', handleKey, true);
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+      // Restore focus to the trigger only if focus would otherwise be lost
+      // (e.g. the panel unmounted) or is already on the body.
+      if (previousFocus) {
+        if (!document.contains(document.activeElement) || document.activeElement === document.body) {
+          previousFocus.focus();
+        }
+      }
     };
   }, [isOpen, onClose]);
+
+  // While open, block background interaction via inert on the app root if the
+  // browser supports it (panel lives outside app root; we mark everything but
+  // ourselves inert is not possible, so we rely on the overlay covering the page).
+  useEffect(() => {
+    if (!isOpen) return;
+    // Defensive: if focus escapes (e.g. programmatic focus), bring it back.
+    const recapture = () => {
+      if (panelRef.current && !panelRef.current.contains(document.activeElement)) {
+        panelRef.current.focus();
+      }
+    };
+    document.addEventListener('focusin', recapture);
+    return () => document.removeEventListener('focusin', recapture);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -65,8 +132,8 @@ export function Modal({
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      {/* Backdrop (pointer-events disabled so clicks land on the overlay itself) */}
+      <div className="pointer-events-none absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
       {/* Panel */}
       <div

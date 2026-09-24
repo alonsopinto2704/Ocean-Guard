@@ -168,8 +168,8 @@ export default function EnvironmentalAI() {
         {/* BUGFIX: previously hardcoded 'SSDLite320' whenever the service replied;
             show the architecture the service actually reports, with a neutral fallback. */}
         <StatCard label="Espada Architecture" value={modelStatus?.ready ? modelStatus.architecture : 'Unavailable'} color="#00ff88" icon={<Brain className="w-5 h-5" />} subvalue={modelStatus?.ready ? modelStatus.engine : 'Model offline'} />
-        <StatCard label="Mean Response Time" value={`${currentDataset.totals.responseTimeH}h`} color="#ffaa00" icon={<Zap className="w-5 h-5" />} subvalue="Dispatch to recovery" />
-        <StatCard label="Recovered Pollutants" value={`${currentDataset.totals.clearedKg.toLocaleString()} kg`} color="#aa55ff" icon={<Activity className="w-5 h-5" />} subvalue="Certified haul logs" />
+        <StatCard label="Mean Response Time" value={`${currentDataset.totals.responseTimeH}h`} color="#ffaa00" icon={<Zap className="w-5 h-5" />} subvalue="Illustrative value — no measured dispatch data" />
+        <StatCard label="Recovered Pollutants" value={`${currentDataset.totals.clearedKg.toLocaleString()} kg`} color="#aa55ff" icon={<Activity className="w-5 h-5" />} subvalue="Illustrative value — not certified haul logs" />
       </div>
 
       {/* Period Selection Controls */}
@@ -218,7 +218,7 @@ export default function EnvironmentalAI() {
             title="Marine Debris Ingestion Trend"
             subtitle={`Classified debris contacts · ${period}`}
             icon={<TrendingUp className="w-4 h-4" />}
-            action={<DataProvenanceBadge status="LIVE" label="TELEMETRY" />}
+            action={<DataProvenanceBadge status="SAMPLE" label="SAMPLE TREND" />}
             className="px-4 pt-4"
           />
           <div role="img" aria-label="Debris detections over time by category.">
@@ -276,7 +276,7 @@ export default function EnvironmentalAI() {
             <div className="text-xs text-[var(--ocean-text-dim)] space-y-1 pt-2 border-t border-[var(--ocean-border)]">
               <div className="flex justify-between">
                 <span>Evaluated Class:</span>
-                <span className="font-semibold text-white">Mixed Waste (TACO benchmark)</span>
+                <span className="font-semibold text-white">Mixed Waste (TACO-trained, general litter)</span>
               </div>
               <div className="flex justify-between">
                 <span>Holdout partition:</span>
@@ -294,7 +294,7 @@ export default function EnvironmentalAI() {
           <CardHeader
             title="Debris by Category"
             subtitle={`Categorical distribution · ${period}`}
-            action={<DataProvenanceBadge status="LIVE" label="FILTERED" />}
+            action={<DataProvenanceBadge status="SAMPLE" label="SAMPLE CATEGORIES" />}
             className="px-4 pt-4"
           />
           <div role="img" aria-label="Debris by category chart.">
@@ -316,7 +316,7 @@ export default function EnvironmentalAI() {
           <CardHeader
             title="Risk Distribution"
             subtitle={`Severity buckets · ${period}`}
-            action={<DataProvenanceBadge status="LIVE" label="FILTERED" />}
+            action={<DataProvenanceBadge status="SAMPLE" label="SAMPLE RISK" />}
             className="px-4 pt-4"
           />
           <div role="img" aria-label="Risk distribution chart.">
@@ -338,7 +338,7 @@ export default function EnvironmentalAI() {
           <CardHeader
             title="Detections vs Cleaned"
             subtitle={`By coastal marine sector · ${period}`}
-            action={<DataProvenanceBadge status="LIVE" label="SECTORS" />}
+            action={<DataProvenanceBadge status="SAMPLE" label="SAMPLE SECTORS" />}
             className="px-4 pt-4"
           />
           <div role="img" aria-label="Detections versus cleaned debris by zone.">

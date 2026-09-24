@@ -50,6 +50,7 @@ export interface StoredDetection {
   boundingBox?: { x: number; y: number; width: number; height: number };
   trackPoints?: Array<{ lat: number; lng: number; timestamp: string; confidence?: number }>;
   notes?: string;
+  originReview?: { label: 'NATURAL' | 'MAN_MADE' | 'UNCERTAIN'; reviewedAt: string; reviewedBy: string };
 }
 
 export interface StoredAlert {
@@ -164,10 +165,25 @@ export interface StoredReport {
     totalDetectionsPeriod: number;
     criticalIncidents: number;
     clearedDebrisKg: number;
-    meanResponseTimeHours: number;
+    meanResponseTimeHours: number | null;
     predominantClass: string;
   };
   summaryText: string;
+  /** Snapshot of the source records used to make this report. Coordinates and boxes retain their original units. */
+  anomalies?: Array<{
+    detectionId: string;
+    detectedAt: string;
+    className: string;
+    originAssessment: 'UNASSESSED' | 'NATURAL' | 'MAN_MADE' | 'UNCERTAIN';
+    originAssessmentSource: 'OPERATOR_REVIEW' | 'UNASSESSED';
+    confidencePercent: number;
+    location: { latitude: number; longitude: number; label: string };
+    boundingBoxNormalized: StoredDetection['boundingBox'] | null;
+    estimatedSize: string;
+    source: StoredDetection['source'];
+    status: StoredDetection['status'];
+    provenance: 'PROTOTYPE_RECORD';
+  }>;
   status: 'FINAL';
 }
 
@@ -936,6 +952,15 @@ class StorageEngine {
     return d;
   }
 
+  public reviewDetectionOrigin(id: string, label: 'NATURAL' | 'MAN_MADE' | 'UNCERTAIN', actor: { id: string; email: string }): StoredDetection | null {
+    const detection = this.db.detections.find(d => d.id === id);
+    if (!detection) return null;
+    detection.originReview = { label, reviewedAt: new Date().toISOString(), reviewedBy: actor.email };
+    this.logAudit(actor.id, actor.email, 'REVIEW_DETECTION_ORIGIN', { detectionId: id, label });
+    this.save();
+    return detection;
+  }
+
   public addDetection(detection: StoredDetection): StoredDetection {
     this.db.detections.unshift(detection);
     this.save();
@@ -1018,7 +1043,9 @@ class StorageEngine {
 
   public createCleanupMission(data: Partial<StoredCleanupMission>, actor?: { id: string; email: string; name?: string }): StoredCleanupMission {
     const newMission: StoredCleanupMission = {
-      id: `CM-${Date.now().toString().slice(-4)}`,
+      // Random suffix prevents collisions when missions are created within the
+      // same 10-second window (a bare Date.now().slice(-4) wraps every 10 s).
+      id: `CM-${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`.toUpperCase(),
       title: data.title?.trim() || 'Coastal Cleanup Operation',
       status: data.status || (data.assignedTeam ? 'ASSIGNED' : 'DRAFT'),
       priority: data.priority || 'HIGH',
@@ -1082,7 +1109,9 @@ class StorageEngine {
     const mission = this.db.cleanupMissions.find(m => m.id === missionId);
     if (!mission) return null;
     const newEv: StoredCleanupEvidence = {
-      id: `EV-${Date.now().toString().slice(-4)}`,
+      // Random suffix prevents duplicate evidence ids inside the same 10-second
+      // window, which previously overwrote each other's identity in the UI.
+      id: `EV-${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`.toUpperCase(),
       type: evidence.type || 'DURING',
       description: evidence.description?.trim() || 'Field evidence log',
       recoveredKg: evidence.recoveredKg,
@@ -1117,26 +1146,68 @@ class StorageEngine {
     startDate?: string;
     endDate?: string;
   }, actor?: { id: string; email: string; name?: string }): StoredReport {
+    // Aggregate real stored rows for the requested period/zone so changing
+    // filters changes results. No fabricated totals: a metric with no matching
+    // stored data reports 0, and the summary text states the data basis.
+    const endMs = data.endDate ? Date.parse(data.endDate) + 86400000 : Date.now();
+    const startMs = data.startDate ? Date.parse(data.startDate) : endMs - 86400000;
+    const zoneId = data.zoneId || 'ALL';
+    const inPeriod = (iso: string) => {
+      const t = Date.parse(iso);
+      return Number.isFinite(t) && t >= startMs && t <= endMs;
+    };
+    const detections = this.db.detections.filter(d =>
+      inPeriod(d.detectedAt) && (zoneId === 'ALL' || d.zoneId === zoneId || d.zoneName === zoneId));
+    const criticalIncidents = this.db.alerts.filter(a =>
+      a.priority === 'CRITICAL' && inPeriod(a.triggeredAt) &&
+      (zoneId === 'ALL' || a.locationLabel.includes(zoneId))).length;
+    const clearedKg = this.db.cleanupMissions
+      .filter(m => zoneId === 'ALL' || m.zoneId === zoneId || m.zoneName === zoneId)
+      .flatMap(m => m.evidence)
+      .filter(e => inPeriod(e.uploadedAt))
+      .reduce((sum, e) => sum + (e.recoveredKg || 0), 0);
+    const classCounts = new Map<string, number>();
+    for (const d of detections) classCounts.set(d.category, (classCounts.get(d.category) ?? 0) + 1);
+    const predominant = [...classCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const periodDetections = detections.length;
+    const summaryText = periodDetections === 0
+      ? `${data.type} report for ${zoneId === 'ALL' ? 'all zones' : zoneId}: no stored detections match the selected period. The prototype store contains only a small demo dataset.`
+      : `${data.type} report for ${zoneId === 'ALL' ? 'all zones' : zoneId}, aggregated from ${periodDetections} stored detection record(s) in the prototype dataset. Prototypical records, not a complete operational history.`;
+
     const report: StoredReport = {
       id: `RPT-${Date.now().toString().slice(-6)}`,
       type: data.type,
-      zoneId: data.zoneId || 'ALL',
-      startDate: data.startDate || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
-      endDate: data.endDate || new Date().toISOString().slice(0, 10),
+      zoneId,
+      startDate: data.startDate || new Date(startMs).toISOString().slice(0, 10),
+      endDate: data.endDate || new Date(endMs - 1).toISOString().slice(0, 10),
       generatedAt: new Date().toISOString(),
-      generatedBy: actor?.name || actor?.email || 'Cmdr. Elena Vance',
+      generatedBy: actor?.name || actor?.email || 'Operator',
       metrics: {
-        totalDetectionsPeriod: 412,
-        criticalIncidents: 6,
-        clearedDebrisKg: 242,
-        meanResponseTimeHours: 1.8,
-        predominantClass: 'Plastic Bottle (42%)',
+        totalDetectionsPeriod: periodDetections,
+        criticalIncidents,
+        clearedDebrisKg: clearedKg,
+        meanResponseTimeHours: null,
+        predominantClass: predominant ? `${predominant[0]} (${Math.round((predominant[1] / periodDetections) * 100)}%)` : 'No classified records in period',
       },
-      summaryText: `${data.type} report generated for Zone ${data.zoneId || 'ALL'}. Operational telemetry confirmed across 5 monitored coastal sectors.`,
+      summaryText,
+      anomalies: detections.map(d => ({
+        detectionId: d.id,
+        detectedAt: d.detectedAt,
+        className: d.className,
+        originAssessment: d.originReview?.label ?? 'UNASSESSED',
+        originAssessmentSource: d.originReview ? 'OPERATOR_REVIEW' : 'UNASSESSED',
+        confidencePercent: d.confidence,
+        location: { latitude: d.lat, longitude: d.lng, label: d.locationLabel },
+        boundingBoxNormalized: d.boundingBox ?? null,
+        estimatedSize: d.estimatedSize,
+        source: d.source,
+        status: d.status,
+        provenance: 'PROTOTYPE_RECORD',
+      })),
       status: 'FINAL',
     };
     this.db.reports.unshift(report);
-    this.logAudit(actor?.id || 'SYSTEM', actor?.email || 'system', 'GENERATE_REPORT', { reportId: report.id, type: report.type });
+    this.logAudit(actor?.id || 'SYSTEM', actor?.email || 'system', 'GENERATE_REPORT', { reportId: report.id, type: report.type, detections: periodDetections });
     this.save();
     return report;
   }

@@ -1,5 +1,7 @@
 # OceanGuard
 
+For the current simulation/replay completion status and final verification tasks, see [FINAL_IMPROVEMENT_PLAN.md](FINAL_IMPROVEMENT_PLAN.md).
+
 OceanGuard is a responsive marine-debris monitoring and response application. Its AI component is **Espada version 1**, a self-hosted real-time detection service with confidence reporting, risk analysis, human review, and asynchronous continual learning.
 
 Espada does not use Gemini, OpenAI, Roboflow, or any other paid inference API. No AI API key is required. Website visitors need only a modern browser; inference runs on the deployed server.
@@ -57,10 +59,9 @@ The packaged container includes the verified `SSDLite320 MobileNetV3` ONNX pilot
 ## Try Espada
 
 1. Sign in with `operator@oceanguard.ai` and password `demo1234`.
-2. Open **AI Model Registry** to see Espada’s live state.
-3. Select **Try Espada**.
-4. Upload a JPG, PNG, or WebP image, or start the browser camera.
-5. Confirm correct candidates, mark false positives, or choose the correct debris class.
+2. Open **Espada AI & Data** to see Espada’s live state, upload images, and review results.
+3. Upload a JPG, PNG, or WebP image, or start the browser camera.
+4. Confirm correct candidates, mark false positives, or choose the correct debris class.
 
 The built-in cold-start detector identifies visually unusual regions in a water scene as `Mixed Waste` candidates. It is useful for testing and initial data collection; it is not a replacement for training on representative labeled marine imagery.
 
@@ -104,7 +105,7 @@ The AI is deliberately isolated in [`ai_service/`](ai_service/). Copy that direc
 - `GET /health`
 - `GET /v1/model`
 - `POST /v1/detect` with multipart field `file`
-- `POST /v1/feedback`
+- `PUT /v1/analyses/{analysis_id}/review`
 - `GET /v1/learning`
 
 The folder includes its runtime Dockerfile, training Dockerfile, class schema, learning store, model exporter, tests, and documentation. It does not import OceanGuard frontend code.

@@ -25,6 +25,7 @@ export default function CleanupDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // Evidence modal state
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
@@ -65,8 +66,9 @@ export default function CleanupDetail() {
 
       const updated = await cleanupApi.update(mission.id, updates);
       setMission(updated);
+      setActionNotice(null);
     } catch (err: any) {
-      alert(`Could not update status: ${err.message}`);
+      setActionNotice(`Could not update status: ${err.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -106,8 +108,9 @@ export default function CleanupDetail() {
       setShowEvidenceModal(false);
       setEvidenceDesc('');
       setRecoveredKg('');
+      setActionNotice(null);
     } catch (err: any) {
-      alert(`Failed to add evidence: ${err.message}`);
+      setActionNotice(`Failed to add evidence: ${err.message}`);
     } finally {
       setUploadingEvidence(false);
     }
@@ -139,6 +142,14 @@ export default function CleanupDetail() {
 
   return (
     <div className="p-3 space-y-6 max-w-5xl mx-auto sm:p-6">
+      {/* Action Notice */}
+      {actionNotice && (
+        <div role="alert" className="flex items-center justify-between rounded border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+          <span>{actionNotice}</span>
+          <button onClick={() => setActionNotice(null)} className="font-semibold text-red-400 hover:text-red-200 cursor-pointer">Dismiss</button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
         <div className="flex min-w-0 items-start gap-3">
@@ -211,7 +222,7 @@ export default function CleanupDetail() {
               size="sm"
               loading={actionLoading}
               onClick={() => {
-                if (confirm('Cancel this cleanup operation? This decision is permanently logged.')) {
+                if (window.confirm('Cancel this cleanup operation? This decision is permanently logged.')) {
                   handleUpdateStatus('CANCELLED');
                 }
               }}

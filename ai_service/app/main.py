@@ -115,7 +115,10 @@ async def require_service_token(request: Request, call_next):
 
 @app.get("/health")
 def health() -> dict:
-    return detector.status()
+    status = detector.status()
+    if not status["ready"]:
+        raise HTTPException(status_code=503, detail=status)
+    return status
 
 
 @app.get("/v1/model")
@@ -129,7 +132,7 @@ def learning_status() -> dict:
 
 
 @app.post("/v1/detect")
-async def detect(file: UploadFile = File(...)) -> dict:
+async def detect(request: Request, file: UploadFile = File(...)) -> dict:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Upload a JPG, PNG, or WebP image.")
 
@@ -139,6 +142,10 @@ async def detect(file: UploadFile = File(...)) -> dict:
 
     try:
         result = await run_in_threadpool(detector.predict, image_bytes, file.filename or "upload")
+        # Simulation/replay harness frames must never enter the analysis store or
+        # the reviewed-feedback training queue (X-Espada-Skip-Learning: true).
+        if request.headers.get("x-espada-skip-learning", "").casefold() == "true":
+            return {**result, "analysisId": None, "learningSkipped": True}
         analysis_id = await run_in_threadpool(learning_store.record_analysis,
             image_bytes, file.filename or "upload", result
         )

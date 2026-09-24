@@ -36,7 +36,9 @@ function SystemHealthPanel() {
   const items = [
     { label: 'System',   value: health?.system ?? (isOnline ? 'ONLINE' : 'UNAVAILABLE'), ok: health?.system === 'ONLINE' },
     { label: 'AI Engine', value: health?.ai ?? 'STANDBY', ok: health?.ai === 'RUNNING' },
-    { label: 'GPS',      value: health?.gps ?? '—', ok: health?.gps === 'VALID' },
+    // No real GPS receiver is connected in this prototype; the field arrives as
+    // UNAVAILABLE and must never render as a healthy green chip.
+    { label: 'GPS',      value: 'NO FIX', ok: false },
     { label: 'Internet', value: isOnline ? 'ONLINE' : 'OFFLINE', ok: isOnline },
     { label: 'Cameras',  value: health ? `${health.activeCameras}/${health.totalCameras}` : '—', ok: Boolean(health && health.activeCameras > 0) },
     { label: 'Latency',  value: health?.aiLatencyMs ? `${health.aiLatencyMs.toFixed(1)}ms` : '—', ok: true },
@@ -65,6 +67,8 @@ export default function CommandCenter() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
 
   // Alert Manager Drawer / Modal
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
@@ -106,7 +110,8 @@ export default function CommandCenter() {
   // Close the cached AudioContext when leaving the page so the browser slot is freed.
   useEffect(() => () => { void audioCtxRef.current?.close(); }, []);
 
-  // Fetch trends + alerts + detections in parallel; failures fall back to empty lists.
+  // Fetch trends + alerts + detections in parallel. Failures stay visible:
+  // an offline request must be distinguishable from empty results.
   const loadData = async () => {
     try {
       const [t, a, d] = await Promise.all([
@@ -117,7 +122,12 @@ export default function CommandCenter() {
       setTrends(t.history ?? []);
       setAlerts(a.alerts ?? []);
       setDetections(d.detections ?? []);
-    } catch { /* fallback to empty */ }
+      setLoadError(null);
+      setLastLoadedAt(new Date());
+    } catch (err: any) {
+      // Keep previously loaded data on screen, but surface the failure.
+      setLoadError(err?.message || 'Coastal telemetry is unreachable. Showing the last loaded data.');
+    }
     finally { setLoading(false); }
   };
 
@@ -202,6 +212,22 @@ export default function CommandCenter() {
 
   return (
     <div className="p-3 sm:p-6 space-y-5 sm:space-y-6 max-w-7xl mx-auto">
+      {/* Data availability banner: visible error + retry, distinguishable from empty */}
+      {loadError && (
+        <div role="alert" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-400" />
+            <div>
+              <p className="text-xs font-semibold text-amber-300">Live data unavailable</p>
+              <p className="text-[11px] text-amber-200/80">{loadError}{lastLoadedAt ? ` Last updated ${formatRelativeTime(lastLoadedAt.toISOString())}.` : ' No data has loaded yet.'}</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => { setLoading(true); void loadData(); }}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Top Action Banner */}
       <div className="flex flex-col gap-3 rounded-lg border border-[#ff5964]/30 bg-gradient-to-r from-[#93000a]/20 to-[#161c28] p-4 sm:flex-row sm:items-center sm:justify-between shadow-lg">
         <div className="flex items-start gap-3">
@@ -257,9 +283,9 @@ export default function CommandCenter() {
         <Card className="xl:col-span-2" noPad>
           <CardHeader
             title="7-Day Coastal Debris Detection Volume"
-            subtitle="Verified incident trajectory across coastal monitoring sectors"
+            subtitle="Sample incident trend across demo sectors"
             icon={<TrendingUp className="w-4 h-4 text-cyan-400" />}
-            action={<DataProvenanceBadge status="LIVE" label="LIVE DATABASE" />}
+            action={<DataProvenanceBadge status="SAMPLE" label="SAMPLE TRENDS" />}
             className="px-4 pt-4"
           />
           <ResponsiveContainer width="100%" height={220}>
@@ -285,14 +311,14 @@ export default function CommandCenter() {
           </ResponsiveContainer>
         </Card>
 
-        {/* Category breakdown */}
-        <Card noPad>
-          <CardHeader
-            title="Debris Distribution by Class"
-            subtitle="Active sector accumulation"
-            icon={<Target className="w-4 h-4 text-cyan-400" />}
-            className="px-4 pt-4"
-          />
+        {/* Category breakdown */}          <Card noPad>
+            <CardHeader
+              title="Debris Distribution by Class"
+              subtitle="Sample category totals — not live counts"
+              icon={<Target className="w-4 h-4 text-cyan-400" />}
+              action={<DataProvenanceBadge status="SAMPLE" label="SAMPLE" />}
+              className="px-4 pt-4"
+            />
           <div className="flex justify-center">
             <PieChart width={180} height={180}>
               <Pie data={CATEGORY_DATA} cx={90} cy={90} innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
@@ -390,7 +416,7 @@ export default function CommandCenter() {
           <div className="flex items-center justify-between px-4 pt-4 mb-2">
             <CardHeader
               title="Recent Detections"
-              subtitle="Latest verified items from sensor mesh"
+              subtitle="Latest records from the prototype store"
               icon={<Activity className="w-4 h-4 text-cyan-400" />}
               className="mb-0"
             />
@@ -440,13 +466,11 @@ export default function CommandCenter() {
             <div className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
               <span className={`text-xs font-semibold ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {isOnline ? 'Coastal telemetry connected' : 'Telemetry temporarily unavailable'}
+                {isOnline ? 'Demo API connected' : 'Demo API unavailable'}
               </span>
             </div>
             <p className="text-[10px] text-[var(--ocean-text-dim)] mt-1">
-              {health?.ai === 'RUNNING'
-                ? 'Espada v1 · image analysis online'
-                : 'Espada v1 · image analysis temporarily unavailable'}
+              Check Espada AI & Data for the inference service status.
             </p>
           </div>
         </Card>

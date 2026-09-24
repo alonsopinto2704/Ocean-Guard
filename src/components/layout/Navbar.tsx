@@ -67,7 +67,7 @@ export function Navbar({ title, subtitle, sampleMission = false, navigationOpen 
             Surveillance Fleet
           </span>
           <span className="font-data-mono-sm text-[11px] font-bold text-[#4cd6fb]">
-            {summary?.camerasOnline ? `${summary.camerasOnline} CAMERAS ONLINE` : '7 COASTAL SECTORS'}
+            {summary?.camerasOnline ? `${summary.camerasOnline} CAMERAS ONLINE` : 'CAMERA FLEET UNAVAILABLE'}
           </span>
         </div>
         <div className="h-6 w-px bg-[#3a4a46]/50" />
@@ -85,7 +85,7 @@ export function Navbar({ title, subtitle, sampleMission = false, navigationOpen 
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
         {/* Connection status badge */}
         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#161c28] border border-[#3a4a46]/60 font-mono text-[11px]">
-          {sampleMission ? <span className="text-[#d9d9b5]">SAMPLE SCENE</span> : isOnline ? (
+          {sampleMission ? <span className="text-[#d9d9b5]">SURVEY WORKSPACE</span> : isOnline ? (
             <>
               <span className="w-1.5 h-1.5 rounded-full bg-[#00f5d4] shadow-[0_0_6px_#00f5d4]" />
               <span className="text-[#00f5d4] font-semibold">ONLINE</span>

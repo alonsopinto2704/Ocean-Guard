@@ -3,12 +3,14 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Navbar } from './Navbar';
 import { SkipLink } from '../ui/SkipLink';
+import { ErrorBoundary } from '../ui/ErrorBoundary';
 
 // Page title/subtitle shown in the Navbar, keyed by route (prefix-matched below).
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   '/portal':     { title: 'Public 3D Portal',     subtitle: 'Interactive 3D marine debris visualization' },
-  '/command':    { title: 'Command Center',        subtitle: 'Real-time operations overview' },
-  '/monitoring': { title: '3D Monitoring',       subtitle: 'Interactive sample coastal mission' },
+  '/command':    { title: 'Command Center',        subtitle: 'Prototype operations overview' },
+  '/monitoring': { title: '3D Monitoring',       subtitle: 'Run a survey · inspect detections · save observations' },
+  '/replay':     { title: 'Mission Replay', subtitle: 'Recorded observations · tracks · seabed survey' },
   '/detections': { title: 'Debris Detections',    subtitle: 'All detected marine debris events' },
   '/hotspots':   { title: 'Pollution Hotspots',   subtitle: 'Pollution concentration analysis' },
   '/ai':         { title: 'Environmental AI',     subtitle: 'AI analytics & environmental intelligence' },
@@ -63,7 +65,7 @@ export function AppLayout() {
         <Navbar
           title={meta.title}
           subtitle={meta.subtitle}
-          sampleMission={location.pathname === '/monitoring'}
+          sampleMission={['/monitoring', '/replay'].includes(location.pathname)}
           navigationOpen={mobileNavOpen}
           onOpenNavigation={() => setMobileNavOpen(true)}
         />
@@ -73,7 +75,11 @@ export function AppLayout() {
           tabIndex={-1}
           className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth outline-none"
         >
-          <Outlet />
+          {/* A failed lazy chunk or render error recovers here without taking
+              down the shell (sidebar/navbar remain usable). */}
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

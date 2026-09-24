@@ -67,10 +67,24 @@ CPU training is portable but can be slow. A GPU-enabled trainer image can be sub
 - Restrict access to operator and review screens.
 - Set disk quotas and retention rules for stored inference images.
 - Monitor `/api/health` and `/api/ai/status`.
+- Check that `/api/ai/status` says `READY` with engine `ONNX Runtime` before
+  accepting inference traffic. The container health check rejects an unready
+  service; it can still pass in visual-anomaly bootstrap mode if ONNX weights
+  are unavailable, so check the reported state and engine explicitly.
 - Keep training and validation imagery from the same mission in only one split.
 - Inspect every promoted metric record in `ai_service/models/model-metadata.json`.
 - Back up the learning volume and current ONNX file.
 - Scale inference separately from the trainer for heavier camera traffic.
+
+## Model scope and acceptance
+
+The bundled Espada model loads and can perform inference, but its metadata
+describes a one-class `Mixed Waste` general-litter pilot, with IoU-0.50
+precision 0.353 and recall 0.231 on its validation set. This is not validated
+marine or sonar classification. It does not distinguish natural from
+man-made objects, estimate real-world bounding dimensions or depth from a
+single RGB frame, or localize an object without external position metadata.
+Review every result. Do not use the pilot metrics as field acceptance evidence.
 
 ## Vercel website deployment
 

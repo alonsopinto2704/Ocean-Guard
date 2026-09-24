@@ -26,6 +26,28 @@ export function createOceanElements(terrainHeight: (x: number, z: number) => num
   });
   group.add(grass);
 
+  // Sparse tube sponges give the seabed a readable scale without covering the survey corridor.
+  const sponges = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(.13, .23, .9, 7, 1, true),
+    new THREE.MeshStandardMaterial({ color: '#b58161', roughness: 1, side: THREE.DoubleSide }),
+    48,
+  );
+  for (let i = 0; i < sponges.count; i++) {
+    const patch = patches[i % patches.length];
+    const angle = i * 2.39996;
+    const radius = 1.6 + (i % 12) * .31;
+    const x = patch[0] + Math.cos(angle) * radius;
+    const z = patch[1] + Math.sin(angle) * radius;
+    const height = .45 + (i % 5) * .16;
+    dummy.position.set(x, terrainHeight(x, z) + height / 2, z);
+    dummy.rotation.set((i % 3 - 1) * .1, angle, (i % 4 - 2) * .07);
+    dummy.scale.set(.65 + (i % 4) * .18, height / .9, .65 + (i % 4) * .18);
+    dummy.updateMatrix();
+    sponges.setMatrixAt(i, dummy.matrix);
+    sponges.setColorAt(i, new THREE.Color(i % 3 ? '#9b755e' : '#b98b69'));
+  }
+  group.add(sponges);
+
   const metal = new THREE.MeshStandardMaterial({ color: '#6d8589', roughness: .5, metalness: .65 });
   const yellow = new THREE.MeshStandardMaterial({ color: '#dcad43', roughness: .55, metalness: .2 });
   const anchor = new THREE.Mesh(new THREE.BoxGeometry(1.35, .45, 1.35), metal);

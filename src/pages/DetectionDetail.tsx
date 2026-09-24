@@ -57,6 +57,7 @@ export default function DetectionDetail() {
   const [showFalsePositive, setShowFalsePositive] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [notice, setNotice] = useState('');
+  const [originSaving, setOriginSaving] = useState(false);
 
   // Load the detection and its track in parallel; a missing track is non-fatal.
   const loadData = async () => {
@@ -108,9 +109,23 @@ export default function DetectionDetail() {
       setShowFalsePositive(false);
       setNotice(`${detection.id} has been recorded as a false positive. Target is omitted from autonomous cleanup queues.`);
     } catch (err: any) {
-      alert(`Failed to update status: ${err.message}`);
+      setNotice(`Failed to update status: ${err.message}`);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const reviewOrigin = async (label: 'NATURAL' | 'MAN_MADE' | 'UNCERTAIN') => {
+    if (!detection) return;
+    setOriginSaving(true);
+    try {
+      const updated = await detectionsApi.reviewOrigin(detection.id, label);
+      setDetection(updated);
+      setNotice(`Origin recorded as ${label.replace('_', ' ')} by operator review.`);
+    } catch (reviewError) {
+      setNotice(reviewError instanceof Error ? reviewError.message : 'Could not save origin review.');
+    } finally {
+      setOriginSaving(false);
     }
   };
 
@@ -249,6 +264,17 @@ export default function DetectionDetail() {
           </div>
 
           {/* Risk Factors Breakdown */}
+          <Card>
+            <CardHeader title="Natural or man-made review" subtitle="Operator assessment; the current Espada model does not predict origin" />
+            <p className="mb-3 text-xs text-[var(--ocean-text-dim)]">Current: {d.originReview ? `${d.originReview.label.replace('_', ' ')} · reviewed by ${d.originReview.reviewedBy}` : 'Unassessed'}</p>
+            <div className="flex flex-wrap gap-2">
+              {(['NATURAL', 'MAN_MADE', 'UNCERTAIN'] as const).map(label => (
+                <Button key={label} size="sm" variant="outline" disabled={originSaving} onClick={() => void reviewOrigin(label)}>
+                  {label.replace('_', ' ')}
+                </Button>
+              ))}
+            </div>
+          </Card>
           <Card>
             <CardHeader title="Neural & Environmental Risk Breakdown" />
             <div className="space-y-3">

@@ -71,7 +71,8 @@ export default function Reports() {
         setHistory(res.reports);
       }
     } catch (err: any) {
-      console.error('Failed to load reports history:', err);
+      // Visible failure, distinguishable from an empty repository.
+      setError(err?.message || 'Could not load the report repository. Is the server reachable?');
     } finally {
       setLoadingHistory(false);
     }
@@ -81,7 +82,7 @@ export default function Reports() {
     fetchHistory();
   }, []);
 
-  // Ask the server to compile a report from real telemetry, then refresh history.
+  // Ask the server to compile a report from stored prototype records, then refresh history.
   const handleGenerate = async () => {
     setGenerating(true);
     setGenerated(null);
@@ -104,7 +105,7 @@ export default function Reports() {
   };
 
   // Build a clearly-labeled SAMPLE report locally so the UI can be evaluated
-  // when live telemetry is unavailable (badge shows SAMPLE, not LIVE).
+  // without saving it (both this preview and the store use prototype data).
   const handlePreviewSample = () => {
     setError(null);
     setIsSample(true);
@@ -222,7 +223,7 @@ export default function Reports() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] text-[var(--ocean-text-muted)] mb-1">Start Date</label>
                   <input
@@ -253,7 +254,7 @@ export default function Reports() {
                 onClick={handleGenerate}
                 icon={!generating ? <FileText className="w-4 h-4" /> : undefined}
               >
-                Compile Live Report
+                Compile Stored-Record Report
               </Button>
               <Button
                 variant="outline"
@@ -281,14 +282,20 @@ export default function Reports() {
                 <div className="flex items-center gap-2">
                   <CheckCircle className={`w-4 h-4 ${isSample ? 'text-amber-400' : 'text-emerald-400'}`} />
                   <span className={`text-xs font-semibold ${isSample ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {isSample ? 'Sample Report Preview' : 'Report Generated & Saved'}
+                    {isSample ? 'Sample Report Preview' : 'Report Generated & Saved (prototype records)'}
                   </span>
                 </div>
-                <DataProvenanceBadge status={isSample ? 'SAMPLE' : 'LIVE'} />
+                <DataProvenanceBadge status="SAMPLE" label={isSample ? 'SAMPLE PREVIEW' : 'PROTOTYPE RECORDS'} />
               </div>
               <p className="text-[10px] font-mono text-[var(--ocean-text-muted)] mb-2">
                 ID: {generated.id || generated.reportId}
               </p>
+
+              {isSample && (
+                <p className="text-[10px] text-amber-300/90 mb-2" role="note">
+                  This is a local sample preview — it was not saved to the report repository, so server export is disabled. Compile a live report to enable PDF/CSV/JSON download.
+                </p>
+              )}
 
               {generated.metrics && (
                 <div className="grid grid-cols-2 gap-2 mb-4">
@@ -296,7 +303,7 @@ export default function Reports() {
                     { l: 'Detections', v: generated.metrics.totalDetectionsPeriod ?? 0 },
                     { l: 'Critical',   v: generated.metrics.criticalIncidents ?? 0 },
                     { l: 'Cleared',    v: `${generated.metrics.clearedDebrisKg ?? 0} kg` },
-                    { l: 'Avg Resp.',  v: `${generated.metrics.meanResponseTimeHours ?? 0}h` },
+                    ...(isSample ? [{ l: 'Avg Resp.',  v: generated.metrics.meanResponseTimeHours === null ? 'Unavailable' : `${generated.metrics.meanResponseTimeHours}h` }] : []),
                   ].map(({ l, v }) => (
                     <div key={l} className="text-center p-2 rounded-lg bg-[var(--ocean-bg)] border border-[var(--ocean-border)]">
                       <p className="text-xs font-bold text-[var(--ocean-text)]">{v}</p>
@@ -306,8 +313,40 @@ export default function Reports() {
                 </div>
               )}
 
+              {!isSample && (
+                <div className="mb-4">
+                  <p className="mb-1 text-[11px] font-semibold text-[var(--ocean-text)]">Structured anomaly evidence</p>
+                  <p className="mb-2 text-[10px] text-[var(--ocean-text-dim)]">Prototype source records. Image boxes are normalized x/y/width/height fractions, not measured metres. Origin, when set, comes from operator review.</p>
+                  <div className="max-h-48 space-y-2 overflow-y-auto">
+                    {(generated.anomalies ?? []).length === 0 ? <p className="text-xs text-[var(--ocean-text-muted)]">{generated.anomalies ? 'No detections match this period and zone.' : 'This older report has no saved per-detection evidence.'}</p> :
+                      generated.anomalies.map((a: any) => <div key={a.detectionId} className="rounded border border-[var(--ocean-border)] bg-[var(--ocean-bg)] p-2 text-[10px]">
+                        <p className="font-mono font-semibold text-cyan-300">{a.detectionId} · {a.className} · {a.confidencePercent}%</p>
+                        <p className="text-[var(--ocean-text-dim)]">{a.location?.label} · {a.location?.latitude}, {a.location?.longitude}</p>
+                        <p className="text-[var(--ocean-text-muted)]">Image box: {a.boundingBoxNormalized ? `${a.boundingBoxNormalized.x}, ${a.boundingBoxNormalized.y}, ${a.boundingBoxNormalized.width}, ${a.boundingBoxNormalized.height}` : 'Unknown'} · Origin: {a.originAssessment} ({a.originAssessmentSource})</p>
+                      </div>)}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <p className="text-[10px] font-semibold text-[var(--ocean-text-dim)]">Export Options:</p>
+                {isSample ? (
+                  <div className="flex gap-2">
+                    {(['pdf', 'csv', 'json'] as const).map(format => (
+                      <Button
+                        key={format}
+                        variant="outline"
+                        size="xs"
+                        fullWidth
+                        disabled
+                        icon={<Download className="w-3 h-3" />}
+                        title="Sample previews are not stored on the server. Compile a live report to export."
+                      >
+                        {format.toUpperCase()}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
                 <div className="flex gap-2">
                   <Button
                     variant="success"
@@ -340,6 +379,7 @@ export default function Reports() {
                     JSON
                   </Button>
                 </div>
+                )}
               </div>
             </Card>
           )}
@@ -350,8 +390,8 @@ export default function Reports() {
           <Card noPad>
             <div className="p-4 border-b border-[var(--ocean-border)] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--ocean-text)]">Permanent Report Repository</h3>
-                <p className="text-xs text-[var(--ocean-text-dim)]">Archived operations summaries and environmental audits</p>
+                <h3 className="text-sm font-semibold text-[var(--ocean-text)]">Saved Report Repository</h3>
+                <p className="text-xs text-[var(--ocean-text-dim)]">Reports generated from the current prototype records</p>
               </div>
               <Button
                 variant="ghost"
@@ -363,7 +403,72 @@ export default function Reports() {
               </Button>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Mobile Card View (< md) */}
+            <div className="md:hidden divide-y divide-[var(--ocean-border)]/50">
+              {loadingHistory && history.length === 0 ? (
+                <div className="p-6 text-center text-xs text-[var(--ocean-text-muted)]">
+                  <LoadingState message="Loading saved reports..." size="sm" />
+                </div>
+              ) : history.length === 0 ? (
+                <div className="p-6 text-center text-xs text-[var(--ocean-text-muted)]">
+                  No saved reports in repository. Generate your first operational report above.
+                </div>
+              ) : (
+                history.map(r => (
+                  <div key={r.id} className="p-3.5 space-y-2.5 hover:bg-[var(--ocean-card-hover)] transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-bold text-cyan-400">{r.id}</span>
+                      <Badge variant="outline" size="xs">{r.type}</Badge>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--ocean-text-dim)]">
+                      <span className="font-medium text-[var(--ocean-text)]">{r.zoneId ? r.zoneId : 'All Sectors'}</span>
+                      <span>·</span>
+                      <span>{formatDate(r.generatedAt)}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center text-[10px] bg-[var(--ocean-bg)] p-2 rounded border border-[var(--ocean-border)]/50">
+                      <div>
+                        <p className="font-bold text-[var(--ocean-text)]">{r.metrics?.totalDetectionsPeriod ?? r.detections ?? '—'}</p>
+                        <p className="text-[var(--ocean-text-muted)]">Detections</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-red-400">{r.metrics?.criticalIncidents ?? r.critical ?? '—'}</p>
+                        <p className="text-[var(--ocean-text-muted)]">Critical</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-emerald-400">{r.metrics?.clearedDebrisKg ?? r.clearedKg ?? 0} kg</p>
+                        <p className="text-[var(--ocean-text-muted)]">Cleared</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => void downloadReport(r.id, 'pdf')}
+                        disabled={downloading === `${r.id}:pdf`}
+                        className="flex-1 py-1.5 text-xs font-medium rounded bg-cyan-950/40 border border-cyan-800/40 text-cyan-300 hover:bg-cyan-900/60 transition-colors text-center"
+                      >
+                        PDF
+                      </button>
+                      <button
+                        onClick={() => void downloadReport(r.id, 'csv')}
+                        disabled={downloading === `${r.id}:csv`}
+                        className="flex-1 py-1.5 text-xs font-medium rounded bg-[var(--ocean-surface)] border border-[var(--ocean-border)] text-[var(--ocean-text-dim)] hover:text-[var(--ocean-text)] transition-colors text-center"
+                      >
+                        CSV
+                      </button>
+                      <button
+                        onClick={() => void downloadReport(r.id, 'json')}
+                        disabled={downloading === `${r.id}:json`}
+                        className="flex-1 py-1.5 text-xs font-medium rounded bg-[var(--ocean-surface)] border border-[var(--ocean-border)] text-[var(--ocean-text-dim)] hover:text-[var(--ocean-text)] transition-colors text-center"
+                      >
+                        JSON
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Desktop Table View (>= md) */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[var(--ocean-border)]">

@@ -7,8 +7,14 @@ services:
       NODE_ENV: production
       PORT: 3000
       AI_SERVICE_URL: http://ai:8000
+      # Durable storage for operational JSON + simulation replay archives:
+      # without this mount, recreated containers lose every saved survey.
+      OCEANGUARD_WEB_DATA_DIR: /app/data
+      SIM_REPLAY_DIR: /app/data/simulation-replays
     ports:
       - "3000:3000"
+    volumes:
+      - oceanguard-web-data:/app/data
     depends_on:
       ai:
         condition: service_healthy
@@ -50,3 +56,4 @@ services:
 
 volumes:
   oceanguard-learning:
+  oceanguard-web-data:

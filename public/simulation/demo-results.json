@@ -1,0 +1,365 @@
+{
+  "generatedAtUtc": "2026-09-22T20:00:32.279Z",
+  "espada": {
+    "base": "http://127.0.0.1:8000",
+    "engine": "ONNX Runtime",
+    "classes": [
+      "Mixed Waste"
+    ]
+  },
+  "seed": 20260922,
+  "rows": [
+    {
+      "scenario": "SIM-NORMAL",
+      "measured": "detections=0, alerts=0, state=COMPLETED",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 120,
+          "captured": 24,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": "UNAVAILABLE",
+          "recall": "UNAVAILABLE",
+          "framesScored": 0,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 0,
+          "predicted": 0,
+          "error": "UNAVAILABLE"
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": "UNAVAILABLE",
+          "n": 0
+        },
+        "latency": {
+          "p50S": "UNAVAILABLE",
+          "p95S": "UNAVAILABLE",
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 0,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    },
+    {
+      "scenario": "SIM-FOV",
+      "measured": "tracks=1, stale/lost=true, detections=11",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 240,
+          "captured": 57,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": 1,
+          "recall": 1,
+          "framesScored": 11,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 1,
+          "predicted": 1,
+          "error": 0
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 4.9,
+          "n": 11
+        },
+        "latency": {
+          "p50S": 0.64,
+          "p95S": 0.85,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 1,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    },
+    {
+      "scenario": "SIM-COUNT",
+      "measured": "unique objects predicted=4/5 (err 1), swaps=0",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 300,
+          "captured": 76,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": 1,
+          "recall": 1,
+          "framesScored": 17,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 5,
+          "predicted": 4,
+          "error": 1
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 4.8,
+          "n": 17
+        },
+        "latency": {
+          "p50S": 0.66,
+          "p95S": 0.85,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 4,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    },
+    {
+      "scenario": "SIM-GLARE",
+      "measured": "calm=6 vs glare=6 detections (precision 0.917)",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 240,
+          "captured": 57,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": 0.917,
+          "recall": 1,
+          "framesScored": 11,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 1,
+          "predicted": 1,
+          "error": 0
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 5.3,
+          "n": 11
+        },
+        "latency": {
+          "p50S": 0.66,
+          "p95S": 0.77,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 1,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    },
+    {
+      "scenario": "SIM-OCCLUSION",
+      "measured": "tracks=1, gap stale/lost=true, identity recovered=true",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 300,
+          "captured": 66,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": 1,
+          "recall": 1,
+          "framesScored": 8,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 1,
+          "predicted": 1,
+          "error": 0
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 4.3,
+          "n": 8
+        },
+        "latency": {
+          "p50S": 0.62,
+          "p95S": 0.74,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 1,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    },
+    {
+      "scenario": "SIM-NOISE",
+      "measured": "duplicates 3/15 deduped, UNKNOWN locations shown=true",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 240,
+          "captured": 50,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": 1,
+          "recall": 1,
+          "framesScored": 3,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 1,
+          "predicted": 1,
+          "error": 0
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 4.6,
+          "n": 3
+        },
+        "latency": {
+          "p50S": 0.61,
+          "p95S": 0.62,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 1,
+        "dedup": {
+          "duplicatesReceived": 15,
+          "duplicatesDropped": 3
+        }
+      }
+    },
+    {
+      "scenario": "SIM-FAULTS",
+      "measured": "dropped=65, failed=5, recovery=5s (≤10s)",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 360,
+          "captured": 69,
+          "dropped": 65,
+          "failed": 5
+        },
+        "perFrame": {
+          "precision": 1,
+          "recall": 1,
+          "framesScored": 10,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 1,
+          "predicted": 1,
+          "error": 0
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 5,
+          "n": 10
+        },
+        "latency": {
+          "p50S": 0.56,
+          "p95S": 1.71,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0.181,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": 5,
+        "alertCount": 1,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    },
+    {
+      "scenario": "SIM-OPS",
+      "measured": "FP review linked to detection=true, completion=true",
+      "pass": true,
+      "metrics": {
+        "available": true,
+        "partial": false,
+        "frames": {
+          "scheduled": 300,
+          "captured": 63,
+          "dropped": 0,
+          "failed": 0
+        },
+        "perFrame": {
+          "precision": 1,
+          "recall": 1,
+          "framesScored": 11,
+          "iouThreshold": 0.3
+        },
+        "uniqueObjectCount": {
+          "truth": 1,
+          "predicted": 1,
+          "error": 0
+        },
+        "identitySwaps": 0,
+        "localization": {
+          "rmseM": 5.1,
+          "n": 11
+        },
+        "latency": {
+          "p50S": 0.55,
+          "p95S": 0.73,
+          "definition": "Wall-clock queue delay per inference, converted to sim seconds at run speed (capture→inference-complete). Display polling adds ≤1 s wall."
+        },
+        "droppedFrameRate": 0,
+        "staleFeedBehaviorS": 15,
+        "recoveryTimeS": "UNAVAILABLE",
+        "alertCount": 1,
+        "dedup": {
+          "duplicatesReceived": 0,
+          "duplicatesDropped": 0
+        }
+      }
+    }
+  ]
+}

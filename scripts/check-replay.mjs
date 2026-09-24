@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { getReplayBounds, getVisibleTracks, ingestionField, pathGeometry, sortByIngestion, toMs, visibleByIngestion } from '../src/lib/replay.ts';
+import dataset from '../public/simulation/mission.json' with { type: 'json' };
+
+const telemetry = sortByIngestion(dataset.tables.telemetry);
+const bounds = getReplayBounds(dataset.tables);
+assert.deepEqual(getReplayBounds(), { start: 0, end: 0 });
+assert.equal(bounds.end, Date.parse('2026-01-15T02:30:00.200Z'));
+assert.equal(visibleByIngestion(telemetry, bounds.end).length, telemetry.length);
+assert.equal(visibleByIngestion(telemetry, Date.parse('2026-01-15T02:00:00.1Z')).length, 0);
+assert.equal(pathGeometry(telemetry, telemetry).segments.length, 2);
+const fixedFirst = pathGeometry(telemetry.slice(0, 1), telemetry).segments[0];
+assert.ok(pathGeometry(telemetry.slice(0, 20), telemetry).segments[0].startsWith(fixedFirst + ' L'));
+assert.deepEqual(getReplayBounds({}), { start: 0, end: 0 });
+assert.equal(getVisibleTracks(dataset.tables.tracks, dataset.tables.detections, bounds.start).length, 0);
+const delayed = dataset.tables.alerts.find(row => row.alert_type === 'delayed_event_demo');
+const arrival = toMs(ingestionField(delayed));
+assert.ok(!visibleByIngestion(dataset.tables.alerts, arrival - 1).includes(delayed));
+assert.ok(visibleByIngestion(dataset.tables.alerts, arrival).includes(delayed));
+assert.equal(visibleByIngestion(telemetry, Date.parse('2026-01-15T02:25:30Z')).length, 1500);
+const tracks = getVisibleTracks(dataset.tables.tracks, dataset.tables.detections, Date.parse('2026-01-15T02:00:42.2Z'));
+assert.ok(tracks.length > 0);
+assert.ok(tracks.every(({ receivedCount }) => receivedCount > 0));
+assert.equal(ingestionField(dataset.tables.telemetry[0]), '2026-01-15T02:00:00.200Z');
+console.log('replay checks passed');

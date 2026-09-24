@@ -1,0 +1,3 @@
+.scenario-object-preview { display: block; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #183643; }
+.scenario-object-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.scenario-object-preview-fallback { display: grid; height: 100%; place-items: center; padding: 8px; color: #c2d7d6; font: 12px 'JetBrains Mono', monospace; text-align: center; }

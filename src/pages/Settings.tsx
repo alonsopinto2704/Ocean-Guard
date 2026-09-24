@@ -3,7 +3,8 @@ import { Card, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../context/AuthContext';
 import { useSystem } from '../context/SystemContext';
-import { Check, RotateCcw, CheckCircle, Shield, Sliders, Bell, Info } from 'lucide-react';
+import { authApi } from '../lib/api';
+import { Check, RotateCcw, CheckCircle, AlertTriangle, Shield, Sliders, Bell, Info } from 'lucide-react';
 
 interface DisplaySettings {
   theme: string;
@@ -64,27 +65,45 @@ export default function Settings() {
   const [fullName, setFullName] = useState(user?.name || '');
   const [organization, setOrganization] = useState(user?.organizationName || '');
   const [saved, setSaved] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.name) setFullName(user.name);
     if (user?.organizationName) setOrganization(user.organizationName);
   }, [user]);
 
-  // Persist both preference groups to localStorage; the saved flag drives the
-  // transient "Settings Saved" button state.
-  const handleSave = () => {
+  // Persist preferences to localStorage AND the profile to the server so a
+  // reload (or another browser) retains saved values. Failures stay visible.
+  const handleSave = async () => {
+    setProfileError(null);
+    const trimmedName = fullName.trim();
+    const trimmedOrg = organization.trim();
+    if (trimmedName.length < 2 || trimmedOrg.length < 2) {
+      setProfileError('Name and organization must each be at least 2 characters.');
+      return;
+    }
+    setSavingProfile(true);
     try {
-      localStorage.setItem('oceanguard_display_settings', JSON.stringify(display));
-      localStorage.setItem('oceanguard_notification_settings', JSON.stringify(notifications));
+      await authApi.updateProfile({ name: trimmedName, organizationName: trimmedOrg });
+      try {
+        localStorage.setItem('oceanguard_display_settings', JSON.stringify(display));
+        localStorage.setItem('oceanguard_notification_settings', JSON.stringify(notifications));
+      } catch {
+        setProfileError('Profile saved on the server, but local preference storage is unavailable.');
+        return;
+      }
       setSaved(true);
-      setNotice('Settings successfully saved to local persistent storage.');
+      setNotice('Settings saved. Your profile is updated server-side and preferences on this device.');
       setTimeout(() => {
         setSaved(false);
         setNotice(null);
       }, 3000);
-    } catch (err) {
-      setNotice('Failed to persist settings.');
+    } catch (err: any) {
+      setProfileError(err?.message || 'Could not save your profile. Please try again.');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -106,6 +125,12 @@ export default function Settings() {
         <div className="flex items-center gap-2 p-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-xs font-mono">
           <CheckCircle className="w-4 h-4 text-cyan-400 flex-shrink-0" />
           <span>{notice}</span>
+        </div>
+      )}
+      {profileError && (
+        <div role="alert" className="flex items-center gap-2 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 text-xs font-mono">
+          <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+          <span>{profileError}</span>
         </div>
       )}
 
@@ -169,7 +194,7 @@ export default function Settings() {
       <Card>
         <CardHeader
           title="Display & Interface Preferences"
-          subtitle="Configure tactical color themes, map styles, and audio telemetry"
+          subtitle="Saved on this device. Alert tone and map style apply where supported; theme and startup view are not yet consumed by the app."
           icon={<Sliders className="w-4 h-4 text-cyan-400" />}
         />
         <div className="space-y-4">
@@ -309,7 +334,8 @@ export default function Settings() {
       <div className="flex items-center gap-3 pt-2">
         <Button
           variant="primary"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
+          loading={savingProfile}
           icon={saved ? <Check className="h-4 w-4" /> : undefined}
         >
           {saved ? 'Settings Saved' : 'Save Preferences'}

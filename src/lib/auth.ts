@@ -14,6 +14,14 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+/** Attach the signed-in operator's token to simulation and replay requests. */
+export function authorizedFetch(input: RequestInfo | URL, options: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(options.headers);
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(input, { ...options, headers });
+}
+
 /** Wipe both token and cached user on logout / auth failure. */
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
