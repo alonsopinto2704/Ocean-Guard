@@ -44,9 +44,20 @@ No paid AI service is contacted. A paid cloud provider can still charge for the 
 
 ### Vercel web deployment
 
-The existing Vercel project deploys the React/Express web gateway only. Espada needs its own persistent container because reviewed images and learning state must survive restarts; Vercel functions are stateless.
+The existing Vercel project deploys the React/Express web gateway only. For a
+demo, import the same GitHub repository as a second Vercel project with Root
+Directory `ai_service`. Its `index.py` serves the packaged ONNX model. Set
+`ESPADA_SERVICE_TOKEN` on that project and the web project, then set
+`AI_SERVICE_URL` on the web project to the second project's HTTPS URL.
 
-Deploy `ai_service/Dockerfile` on a persistent container host with a mounted `/data` volume, then set these variables on both services and redeploy the existing Vercel project:
+The Vercel Espada project runs inference, but its reviewed images and SQLite
+learning state live in temporary instance storage. They can disappear at any
+time, and the trainer does not run there. Use a persistent container and data
+volume for durable reviews and continual learning.
+
+For durable operation, deploy `ai_service/Dockerfile` on a persistent container
+host with a mounted `/data` volume, then set these variables on both services
+and redeploy the existing Vercel project:
 
 ```text
 AI_SERVICE_URL=https://your-private-espada-service.example

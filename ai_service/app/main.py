@@ -106,6 +106,8 @@ app.add_middleware(
 @app.middleware("http")
 async def require_service_token(request: Request, call_next):
     expected = os.getenv("ESPADA_SERVICE_TOKEN", "")
+    if request.url.path.startswith("/v1/") and os.getenv("VERCEL") and not expected:
+        return JSONResponse(status_code=503, content={"detail": "Espada service token is not configured."})
     if expected and request.url.path.startswith("/v1/"):
         supplied = request.headers.get("x-espada-service-token", "")
         if not hmac.compare_digest(supplied, expected):

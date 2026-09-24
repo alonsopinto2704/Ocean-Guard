@@ -6,6 +6,7 @@ import math
 import os
 import re
 import sqlite3
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,8 @@ class RevisionConflictError(ValueError):
 
 class LearningStore:
     def __init__(self) -> None:
-        default_data_dir = Path(__file__).resolve().parents[1] / "data"
+        default_data_dir = (Path(tempfile.gettempdir()) / "oceanguard-learning"
+                            if os.getenv("VERCEL") else Path(__file__).resolve().parents[1] / "data")
         self.data_dir = Path(os.getenv("OCEANGUARD_DATA_DIR", str(default_data_dir)))
         self.image_dir = self.data_dir / "inference-images"
         self.database_path = self.data_dir / "learning.db"

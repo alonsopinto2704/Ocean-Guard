@@ -95,6 +95,13 @@ the website remains available but Espada reports offline because Vercel's
 ephemeral serverless filesystem cannot safely host SQLite-backed continuous
 learning or the persistent trainer.
 
+For inference-only demos, create a second Vercel project from this repository
+with Root Directory `ai_service`. Its `index.py` exposes the packaged Espada
+FastAPI app. Configure the same `ESPADA_SERVICE_TOKEN` on both projects, then
+set `AI_SERVICE_URL` on the web project to the Espada project's HTTPS origin.
+The inference model loads on Vercel, but analysis images and reviews use
+temporary instance storage and are not durable; the trainer is not deployed.
+
 Deploy from the repository root:
 
 ```bash
