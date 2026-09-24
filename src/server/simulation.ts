@@ -10,7 +10,7 @@
  *   bytes + filename only; truth boxes are used exclusively by this evaluator.
  */
 import { Router, Request, Response } from 'express';
-import { getPositiveDepth } from '../lib/bathymetry';
+import { getPositiveDepth } from '../lib/bathymetry.js';
 import fs from 'fs';
 import path from 'path';
 
