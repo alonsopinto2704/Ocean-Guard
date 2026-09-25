@@ -191,7 +191,7 @@ export default function RunEventConsole() {
 
   useEffect(() => {
     if (!run || recording) return;
-    let stopped = false, pending = false, since = 0;
+    let stopped = false, pending = false, since = 0, missing = 0;
     const controller = new AbortController();
     setLiveFeed(EMPTY_FEED);
     const poll = async () => {
@@ -205,7 +205,20 @@ export default function RunEventConsole() {
         else { since = batch.cursor.lastEventId; setLiveFeed(previous => foldEvents(previous, batch.events, summary)); }
         setRun(summary);
         setError('');
-      } catch (cause) { if (!stopped) setError('Event feed interrupted. Last received observations remain visible. ' + String(cause)); }
+        missing = 0;
+      } catch (cause) {
+        if (stopped) return;
+        // A 404 can be a single poll landing on another server instance; only
+        // give up on the session once it stays missing.
+        if (/HTTP 404/.test(String(cause)) && ++missing >= 5) {
+          stopped = true;
+          window.clearInterval(timer);
+          setRun(null);
+          setError('This live session is no longer available on the server. Choose a saved recording below (Replay 1–3 are always available).');
+          return;
+        }
+        setError('Event feed interrupted. Last received observations remain visible. ' + String(cause));
+      }
       finally { pending = false; }
     };
     void poll();
