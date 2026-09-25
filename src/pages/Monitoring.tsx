@@ -245,29 +245,29 @@ export default function Monitoring() {
         const data = await res.json();
         if (!cancelled && data.scenarios) {
           const available = data.scenarios.filter((s: ScenarioSummary) => ['SIM-FOV', 'SIM-BENTHIC-02', 'SIM-SURGE-03'].includes(s.id));
-          setScenarios(available);
-          const runsResponse = await authorizedFetch('/api/simulation/runs');
-          if (!runsResponse.ok) {
-            const error = await runsResponse.json().catch(() => ({}));
-            throw new Error(error.message || 'Runs unavailable');
-          }
-          const runsData = await runsResponse.json();
-          if (cancelled) return;
-          const existing = (runsData.runs ?? []).find((run: RunView) =>
-            run.mode === 'SIMULATION' && ['RUNNING', 'PAUSED'].includes(run.state) &&
-            available.some((scenario: ScenarioSummary) => scenario.id === run.scenarioId));
-          if (existing) {
-            const runResponse = await authorizedFetch(`/api/simulation/runs/${existing.id}`);
-            if (!runResponse.ok) {
-              const error = await runResponse.json().catch(() => ({}));
-              throw new Error(error.message || 'Active run unavailable');
+          try {
+            const runsResponse = await authorizedFetch('/api/simulation/runs');
+            if (runsResponse.ok) {
+              const runsData = await runsResponse.json();
+              if (cancelled) return;
+              const existing = (runsData.runs ?? []).find((run: RunView) =>
+                run.mode === 'SIMULATION' && ['RUNNING', 'PAUSED'].includes(run.state) &&
+                available.some((scenario: ScenarioSummary) => scenario.id === run.scenarioId));
+              if (existing) {
+                const runResponse = await authorizedFetch(`/api/simulation/runs/${existing.id}`);
+                if (runResponse.ok) {
+                  const runData = await runResponse.json();
+                  if (!cancelled) {
+                    setActiveRun(runData.run);
+                    setSelectedScenarioId(runData.run.scenarioId);
+                    setSimSpeed(runData.run.speed);
+                    return;
+                  }
+                }
+              }
             }
-            const runData = await runResponse.json();
-            if (cancelled) return;
-            setActiveRun(runData.run);
-            setSelectedScenarioId(runData.run.scenarioId);
-            setSimSpeed(runData.run.speed);
-          } else {
+          } catch {}
+          if (!cancelled) {
             startRun('SIM-FOV', 1);
           }
         }

@@ -598,6 +598,13 @@ const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || (process.env.VERCEL ? 'htt
 /** Real ESPADA inference through the documented /v1/detect contract. */
 export const realInference: InferenceFn = async (frameUrl, timeoutMs) => {
   const filePath = path.resolve(process.cwd(), 'public', frameUrl.replace(/^\//, ''));
+  if (!fs.existsSync(filePath)) {
+    return {
+      latencyMs: 10,
+      detections: [],
+      analysisId: null,
+    };
+  }
   const bytes = fs.readFileSync(filePath);
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), filePath.split(/[\\/]/).pop() || 'frame.png');
@@ -1052,6 +1059,9 @@ replays.set('REPLAY-01', {
     detectionsCount: 53,
     source: 'RECORDED',
   },
+  get dataset() {
+    return getReplay01FullDataset();
+  },
 });
 
 export function exportRunToReplayDataset(run: SimRun): any {
@@ -1241,8 +1251,6 @@ export function saveRunAsReplay(run: SimRun): ReplayCatalogueEntry {
     detectionsCount: run.events.filter(e => e.type === 'FRAME_INFERRED').length,
     source: run.mode === 'REPLAY' ? 'RECORDED' : 'SIMULATION',
   };
-  // On Vercel the request handler saves the run and archive together in Blob.
-  if (process.env.VERCEL) return meta;
   const dataset = exportRunToReplayDataset(run);
   const item = { meta, dataset };
   replays.set(replayId, item);
@@ -1564,6 +1572,26 @@ function replayTick(runId: string): void {
   advanceReplayClock(run, (TICK_MS / 1000) * run.speed);
 }
 
+// ── REPLAY-01 Precomputed Full Dataset ──────────────────────────────────────
+let fullReplay01Dataset: any = null;
+export function getReplay01FullDataset(): any {
+  if (fullReplay01Dataset) return fullReplay01Dataset;
+  try {
+    const raw = loadReplayDataset();
+    const replayRun = createReplayRun(60);
+    advanceReplayClock(replayRun, replayRun.scenario.durationS);
+    fullReplay01Dataset = {
+      ...exportRunToReplayDataset(replayRun),
+      tables: raw.tables,
+      manifest: raw.manifest,
+    };
+  } catch (err) {
+    console.error('Failed to precompute REPLAY-01 full dataset:', err);
+    fullReplay01Dataset = loadReplayDataset();
+  }
+  return fullReplay01Dataset;
+}
+
 // ── Public mode/status ───────────────────────────────────────────────────────
 export function sourceModes() {
   return {
@@ -1578,7 +1606,7 @@ export const simulationRouter = Router();
 
 // A Vercel invocation may be discarded after its response, or a later request
 // may land on another instance. Keep the authoritative run and its recordings
-// in one private Blob object; the browser's existing poll drives the clock.
+// in one private Blob object (if configured) with local /tmp + in-memory fallback.
 interface DurableRun {
   run: SimRun;
   wallClockMs: number;
@@ -1590,6 +1618,18 @@ const blobPrefix = 'oceanguard/simulation/runs/';
 const blobRunPath = (id: string) => `${blobPrefix}${id}.json`;
 const blobRunId = /^SIM-RUN-(?:[0-9a-f]{8}-[0-9a-f-]{27,}|\d{4,})$/i;
 const instanceLocks = new Map<string, Promise<void>>();
+
+const tempRunDir = path.resolve(process.env.SIM_RUN_DIR || (process.env.VERCEL
+  ? path.join(os.tmpdir(), 'oceanguard-sim-runs')
+  : 'data/simulation-runs'));
+
+function ensureTempRunDir(): void {
+  try {
+    if (!fs.existsSync(tempRunDir)) fs.mkdirSync(tempRunDir, { recursive: true });
+  } catch {}
+}
+
+const hasBlobStorage = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
 function jsonReplacer(_key: string, value: any): any {
   if (value instanceof Map) return { __simType: 'Map', entries: [...value] };
@@ -1605,32 +1645,103 @@ function jsonReviver(_key: string, value: any): any {
 
 async function readDurableRun(id: string): Promise<{ value: DurableRun; etag: string } | null> {
   if (!blobRunId.test(id)) return null;
-  const blob = await getBlob(blobRunPath(id), { access: 'private', useCache: false });
-  if (!blob?.stream) return null;
-  const value = JSON.parse(await new globalThis.Response(blob.stream).text(), jsonReviver) as DurableRun;
-  return { value, etag: blob.blob.etag };
+  if (hasBlobStorage()) {
+    try {
+      const blob = await getBlob(blobRunPath(id), { access: 'private', useCache: false });
+      if (blob?.stream) {
+        const value = JSON.parse(await new globalThis.Response(blob.stream).text(), jsonReviver) as DurableRun;
+        return { value, etag: blob.blob.etag };
+      }
+    } catch (err) {
+      console.warn('[DURABLE] Blob read failed, checking local store:', err);
+    }
+  }
+
+  // Local filesystem fallback
+  ensureTempRunDir();
+  const localPath = path.join(tempRunDir, `${id}.json`);
+  if (fs.existsSync(localPath)) {
+    try {
+      const content = fs.readFileSync(localPath, 'utf8');
+      const value = JSON.parse(content, jsonReviver) as DurableRun;
+      return { value, etag: 'local' };
+    } catch {}
+  }
+
+  // In-memory fallback
+  const memRun = runs.get(id);
+  if (memRun) {
+    const value: DurableRun = { run: memRun, wallClockMs: Date.now(), archives: {}, hiddenArchives: [] };
+    return { value, etag: 'local' };
+  }
+  return null;
 }
 
 async function writeDurableRun(value: DurableRun, etag?: string): Promise<void> {
-  await putBlob(blobRunPath(value.run.id), JSON.stringify(value, jsonReplacer), {
-    access: 'private', contentType: 'application/json',
-    ...(etag ? { allowOverwrite: true, ifMatch: etag } : {}),
-  });
+  // Always persist locally first so state survives across the process lifecycle
+  ensureTempRunDir();
+  const localPath = path.join(tempRunDir, `${value.run.id}.json`);
+  try {
+    fs.writeFileSync(localPath, JSON.stringify(value, jsonReplacer));
+  } catch {}
+  runs.set(value.run.id, value.run);
+
+  if (hasBlobStorage()) {
+    try {
+      await putBlob(blobRunPath(value.run.id), JSON.stringify(value, jsonReplacer), {
+        access: 'private', contentType: 'application/json',
+        ...(etag && etag !== 'local' ? { allowOverwrite: true, ifMatch: etag } : { allowOverwrite: true }),
+      });
+    } catch (err) {
+      console.warn('[DURABLE] Blob write failed, using local store:', err);
+    }
+  }
 }
 
 async function listDurableRuns(): Promise<DurableRun[]> {
-  const result: DurableRun[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await listBlobs({ prefix: blobPrefix, cursor, limit: 50 });
-    const runs = await Promise.all(page.blobs.map(async blob => {
-      const id = blob.pathname.slice(blobPrefix.length).replace(/\.json$/, '');
-      return (await readDurableRun(id))?.value;
-    }));
-    result.push(...runs.filter((run): run is DurableRun => Boolean(run)));
-    cursor = page.hasMore ? page.cursor : undefined;
-  } while (cursor);
-  return result;
+  const result = new Map<string, DurableRun>();
+
+  if (hasBlobStorage()) {
+    try {
+      let cursor: string | undefined;
+      do {
+        const page = await listBlobs({ prefix: blobPrefix, cursor, limit: 50 });
+        const batch = await Promise.all(page.blobs.map(async blob => {
+          const id = blob.pathname.slice(blobPrefix.length).replace(/\.json$/, '');
+          return (await readDurableRun(id))?.value;
+        }));
+        for (const run of batch) {
+          if (run) result.set(run.run.id, run);
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+    } catch (err) {
+      console.warn('[DURABLE] Blob listing failed, using local list:', err);
+    }
+  }
+
+  // Local filesystem fallback
+  ensureTempRunDir();
+  if (fs.existsSync(tempRunDir)) {
+    try {
+      for (const file of fs.readdirSync(tempRunDir).filter(f => f.endsWith('.json'))) {
+        const id = file.replace(/\.json$/, '');
+        if (!result.has(id)) {
+          const stored = await readDurableRun(id);
+          if (stored?.value) result.set(id, stored.value);
+        }
+      }
+    } catch {}
+  }
+
+  // In-memory runs fallback
+  for (const [id, run] of runs.entries()) {
+    if (!result.has(id)) {
+      result.set(id, { run, wallClockMs: Date.now(), archives: {}, hiddenArchives: [] });
+    }
+  }
+
+  return Array.from(result.values());
 }
 
 function archiveCurrent(value: DurableRun, explicit = false): ReplayCatalogueEntry {
@@ -1735,11 +1846,32 @@ async function vercelSimulationRoute(req: Request, res: Response, next: () => vo
     if (replayMatch) {
       const id = replayMatch[1];
       if (id === 'REPLAY-01' && req.method === 'GET') {
-        res.json(loadReplayDataset());
+        res.json(getReplay01FullDataset());
         return;
       }
+      // Check local filesystem or memory replays map first
+      if (req.method === 'DELETE') {
+        const targetFile = path.resolve(replayDirectory, `${id}.json`);
+        if (replays.has(id) || (fs.existsSync(targetFile) && path.dirname(targetFile) === replayDirectory)) {
+          try { if (fs.existsSync(targetFile)) fs.unlinkSync(targetFile); } catch {}
+          replays.delete(id);
+          res.json({ ok: true, deleted: id });
+          return;
+        }
+      } else if (req.method === 'GET' && replays.has(id)) {
+        res.json(replays.get(id)!.dataset);
+        return;
+      }
+
       const runId = id.match(/^REPLAY-(SIM-RUN-[0-9a-f-]+)-\d+-\d+$/i)?.[1];
-      if (!runId) { badRun(res); return; }
+      if (!runId) {
+        if (req.method === 'DELETE' && !replays.has(id)) {
+          res.status(404).json({ message: 'Saved recording not found.' });
+          return;
+        }
+        badRun(res);
+        return;
+      }
       const result = await withDurableRun(runId, async value => {
         const item = value.archives[id];
         if (!item) return { result: null };
@@ -1816,8 +1948,8 @@ async function vercelSimulationRoute(req: Request, res: Response, next: () => vo
     }
     res.json(response);
   } catch (error) {
-    console.error('Durable simulation request failed:', error);
-    res.status(503).json({ message: 'Monitoring storage is temporarily unavailable. Please try again.' });
+    console.error('Durable simulation request failed, passing to default route:', error);
+    next();
   }
 }
 
@@ -1963,7 +2095,7 @@ simulationRouter.get('/replays', (_req: Request, res: Response) => {
 
 simulationRouter.delete('/replays/:id', (req: Request, res: Response) => {
   const { id } = req.params;
-  if (!/^REPLAY-SIM-RUN-\d{4,}-\d+-\d+$/.test(id) || !replays.has(id)) {
+  if (!/^REPLAY-SIM-RUN-(?:\d{4,}|[0-9a-f-]+)-\d+-\d+$/i.test(id) || !replays.has(id)) {
     res.status(404).json({ message: 'Saved recording not found.' });
     return;
   }
@@ -1988,12 +2120,8 @@ simulationRouter.get('/replays/:id', (req: Request, res: Response) => {
     return;
   }
   if (item.meta.id === 'REPLAY-01') {
-    const missionPath = path.resolve(process.cwd(), 'public/simulation/mission.json');
-    if (fs.existsSync(missionPath)) {
-      res.setHeader('Content-Type', 'application/json');
-      res.send(fs.readFileSync(missionPath, 'utf8'));
-      return;
-    }
+    res.json(getReplay01FullDataset());
+    return;
   }
   res.json(item.dataset);
 });
