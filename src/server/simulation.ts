@@ -1667,28 +1667,33 @@ function jsonReviver(_key: string, value: any): any {
 
 async function readDurableRun(id: string): Promise<{ value: DurableRun; etag: string } | null> {
   if (!blobRunId.test(id)) return null;
+  let remote: DurableRun | null = null;
   if (hasBlobStorage()) {
     try {
       const blob = await getBlob(blobRunPath(id), { access: 'private', useCache: false });
       if (blob?.stream) {
-        const value = JSON.parse(await new globalThis.Response(blob.stream).text(), jsonReviver) as DurableRun;
-        return { value, etag: blob.blob.etag };
+        remote = JSON.parse(await new globalThis.Response(blob.stream).text(), jsonReviver) as DurableRun;
       }
     } catch (err) {
       console.warn('[DURABLE] Blob read failed, checking local store:', err);
     }
   }
 
-  // Local filesystem fallback
+  // This instance's own copy wins when it is further along than Blob, so a
+  // stale or failed Blob round-trip can never rewind the mission clock.
   ensureTempRunDir();
   const localPath = path.join(tempRunDir, `${id}.json`);
+  let local: DurableRun | null = null;
   if (fs.existsSync(localPath)) {
     try {
-      const content = fs.readFileSync(localPath, 'utf8');
-      const value = JSON.parse(content, jsonReviver) as DurableRun;
-      return { value, etag: 'local' };
+      local = JSON.parse(fs.readFileSync(localPath, 'utf8'), jsonReviver) as DurableRun;
     } catch {}
   }
+  const isNewer = (a: DurableRun, b: DurableRun) =>
+    a.run.internal.nextEventId > b.run.internal.nextEventId ||
+    (a.run.internal.nextEventId === b.run.internal.nextEventId && a.wallClockMs > b.wallClockMs);
+  if (remote && (!local || !isNewer(local, remote))) return { value: remote, etag: 'blob' };
+  if (local) return { value: local, etag: 'local' };
 
   // In-memory fallback
   const memRun = runs.get(id);
@@ -1711,8 +1716,10 @@ async function writeDurableRun(value: DurableRun, etag?: string): Promise<void> 
   if (hasBlobStorage()) {
     try {
       await putBlob(blobRunPath(value.run.id), JSON.stringify(value, jsonReplacer), {
-        access: 'private', contentType: 'application/json',
-        ...(etag && etag !== 'local' ? { allowOverwrite: true, ifMatch: etag } : { allowOverwrite: true }),
+        // No ifMatch: the ETag returned by get() never matched put()'s check, so
+        // every save was rejected. Same-instance requests are serialized by
+        // instanceLocks and the browser polls one request at a time.
+        access: 'private', contentType: 'application/json', allowOverwrite: true,
       });
     } catch (err) {
       console.warn('[DURABLE] Blob write failed, using local store:', err);
