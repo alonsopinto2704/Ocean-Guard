@@ -35,3 +35,6 @@ runid.txt
 data-smoke/
 test_frame*.jpg
 Screenshot *.png
+
+.vercel
+.env*

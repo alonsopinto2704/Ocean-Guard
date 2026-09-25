@@ -1649,7 +1649,9 @@ function ensureTempRunDir(): void {
   } catch {}
 }
 
-const hasBlobStorage = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+// Stores connected through the Vercel dashboard authenticate via OIDC and
+// only expose BLOB_STORE_ID, not a read-write token.
+const hasBlobStorage = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
 function jsonReplacer(_key: string, value: any): any {
   if (value instanceof Map) return { __simType: 'Map', entries: [...value] };
