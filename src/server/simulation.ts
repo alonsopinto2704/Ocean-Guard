@@ -591,7 +591,7 @@ export interface EspadaResult {
   analysisId?: string | null;
 }
 
-const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || (process.env.VERCEL ? 'https://oceanguard-espada.vercel.app' : 'http://127.0.0.1:8000')).replace(/\/$/, '');
 
 /** Real ESPADA inference through the documented /v1/detect contract. */
 export const realInference: InferenceFn = async (frameUrl, timeoutMs) => {

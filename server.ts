@@ -7,7 +7,7 @@ import { simulationRouter, sourceModes } from './src/server/simulation.js';
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const AI_SERVICE_URL = (process.env.AI_SERVICE_URL || (process.env.VERCEL ? 'https://oceanguard-espada.vercel.app' : 'http://127.0.0.1:8000')).replace(/\/$/, '');
 const ESPADA_SERVICE_TOKEN = process.env.ESPADA_SERVICE_TOKEN || '';
 const SESSION_SECRET = process.env.OCEANGUARD_SESSION_SECRET || '';
 const PUBLIC_AI_UNAVAILABLE = 'Espada is temporarily unavailable. Image analysis is paused. Please try again shortly.';
