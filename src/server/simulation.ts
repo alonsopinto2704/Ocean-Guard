@@ -1064,6 +1064,24 @@ replays.set('REPLAY-01', {
   },
 });
 
+// Bundled recordings with original run events (public/simulation/**, shipped
+// via vercel.json includeFiles), so they work without Blob storage.
+const BUNDLED_REPLAYS = [
+  { id: 'REPLAY-02', name: 'Replay 2: Deep Benthic AUV Survey (Recorded Mission)', scenarioId: 'SIM-BENTHIC-02',
+    createdAt: '2026-09-25T09:34:51.508Z', eventsCount: 1613, detectionsCount: 426, file: 'mission-2.json' },
+  { id: 'REPLAY-03', name: 'Replay 3: Coastal Harbor AUV Survey (Recorded Mission)', scenarioId: 'SIM-FOV',
+    createdAt: '2026-09-24T12:17:59.568Z', eventsCount: 1031, detectionsCount: 237, file: 'mission-3.json' },
+];
+export const STATIC_REPLAY_IDS = new Set(['REPLAY-01', ...BUNDLED_REPLAYS.map(r => r.id)]);
+for (const { file, ...meta } of BUNDLED_REPLAYS) {
+  replays.set(meta.id, {
+    meta: { ...meta, source: 'RECORDED' },
+    get dataset() {
+      return loadReplayDataset(file);
+    },
+  });
+}
+
 export function exportRunToReplayDataset(run: SimRun): any {
   const originLat = ENU_ORIGIN.lat;
   const originLon = ENU_ORIGIN.lng;
@@ -1429,12 +1447,14 @@ export function setSpeed(id: string, speed: number): SimRun | null {
 
 // ── Replay runner (recorded dataset, original timestamps preserved) ─────────
 interface ReplayDataset { tables: Record<string, Array<Record<string, string>>>; manifest?: Record<string, unknown> }
-let replayDatasetCache: ReplayDataset | null = null;
-function loadReplayDataset(): ReplayDataset {
-  if (replayDatasetCache) return replayDatasetCache;
-  const p = path.resolve(process.cwd(), 'public/simulation/mission.json');
-  replayDatasetCache = JSON.parse(fs.readFileSync(p, 'utf-8')) as ReplayDataset;
-  return replayDatasetCache;
+const replayDatasetCache = new Map<string, ReplayDataset>();
+function loadReplayDataset(file = 'mission.json'): ReplayDataset {
+  const cached = replayDatasetCache.get(file);
+  if (cached) return cached;
+  const p = path.resolve(process.cwd(), 'public/simulation', file);
+  const data = JSON.parse(fs.readFileSync(p, 'utf-8')) as ReplayDataset;
+  replayDatasetCache.set(file, data);
+  return data;
 }
 
 export function createReplayRun(speed = 60): SimRun {
@@ -1837,7 +1857,7 @@ async function vercelSimulationRoute(req: Request, res: Response, next: () => vo
     }
     if (req.path === '/replays' && req.method === 'GET') {
       const records = await listDurableRuns();
-      const catalogue = [replays.get('REPLAY-01')!.meta,
+      const catalogue = [...[...STATIC_REPLAY_IDS].map(id => replays.get(id)!.meta),
         ...records.flatMap(record => Object.values(record.archives).map(item => item.meta))];
       res.json({ replays: catalogue });
       return;
@@ -1850,6 +1870,10 @@ async function vercelSimulationRoute(req: Request, res: Response, next: () => vo
         return;
       }
       // Check local filesystem or memory replays map first
+      if (req.method === 'DELETE' && STATIC_REPLAY_IDS.has(id)) {
+        res.status(403).json({ message: 'Bundled recordings cannot be deleted.' });
+        return;
+      }
       if (req.method === 'DELETE') {
         const targetFile = path.resolve(replayDirectory, `${id}.json`);
         if (replays.has(id) || (fs.existsSync(targetFile) && path.dirname(targetFile) === replayDirectory)) {
@@ -2076,10 +2100,10 @@ simulationRouter.get('/runs/:id/metrics', (req: Request, res: Response) => {
 });
 
 simulationRouter.get('/replays', (_req: Request, res: Response) => {
-  const all = Array.from(replays.values()).map(r => r.meta).filter(m => m.id === 'REPLAY-01' || (m.detectionsCount ?? 0) > 0);
+  const all = Array.from(replays.values()).map(r => r.meta).filter(m => STATIC_REPLAY_IDS.has(m.id) || (m.detectionsCount ?? 0) > 0);
   const seen = new Map<string, ReplayCatalogueEntry>();
   for (const m of all) {
-    if (m.id === 'REPLAY-01') {
+    if (STATIC_REPLAY_IDS.has(m.id)) {
       seen.set(m.id, m);
       continue;
     }
