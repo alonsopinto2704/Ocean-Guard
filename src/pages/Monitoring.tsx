@@ -247,7 +247,10 @@ export default function Monitoring() {
           const available = data.scenarios.filter((s: ScenarioSummary) => ['SIM-FOV', 'SIM-BENTHIC-02', 'SIM-SURGE-03'].includes(s.id));
           setScenarios(available);
           const runsResponse = await authorizedFetch('/api/simulation/runs');
-          if (!runsResponse.ok) throw new Error('Runs unavailable');
+          if (!runsResponse.ok) {
+            const error = await runsResponse.json().catch(() => ({}));
+            throw new Error(error.message || 'Runs unavailable');
+          }
           const runsData = await runsResponse.json();
           if (cancelled) return;
           const existing = (runsData.runs ?? []).find((run: RunView) =>
@@ -255,7 +258,10 @@ export default function Monitoring() {
             available.some((scenario: ScenarioSummary) => scenario.id === run.scenarioId));
           if (existing) {
             const runResponse = await authorizedFetch(`/api/simulation/runs/${existing.id}`);
-            if (!runResponse.ok) throw new Error('Active run unavailable');
+            if (!runResponse.ok) {
+              const error = await runResponse.json().catch(() => ({}));
+              throw new Error(error.message || 'Active run unavailable');
+            }
             const runData = await runResponse.json();
             if (cancelled) return;
             setActiveRun(runData.run);
@@ -266,7 +272,7 @@ export default function Monitoring() {
           }
         }
       } catch (err) {
-        if (!cancelled) setNotice('Could not load the monitoring service. Refresh this page to retry.');
+        if (!cancelled) setNotice(err instanceof Error ? err.message : 'Could not load the monitoring service. Refresh this page to retry.');
       }
     }
     loadScenarios();

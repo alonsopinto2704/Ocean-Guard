@@ -3,7 +3,7 @@
  *
  * Isolation contract (verified by tests/simulation.test.ts):
  * - This module NEVER imports src/server/storage.ts; operational records are untouched.
- * - Runs live in module-local memory with SIM-RUN- prefixed ids.
+ * - Local runs live in module memory; Vercel stores runs in private Blob storage.
  * - Frames are sent to ESPADA with `X-Espada-Skip-Learning: true`, so no analysis,
  *   image, or training example is created for simulation frames.
  * - Ground truth never reaches the detector or the tracker: requests contain image
@@ -12,6 +12,8 @@
 import { Router, Request, Response } from 'express';
 import { getPositiveDepth } from '../lib/bathymetry.js';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
+import { get as getBlob, put as putBlob, list as listBlobs, BlobPreconditionFailedError } from '@vercel/blob';
 import os from 'os';
 import path from 'path';
 
@@ -1232,7 +1234,6 @@ if (fs.existsSync(replayDirectory)) {
 export function saveRunAsReplay(run: SimRun): ReplayCatalogueEntry {
   const replayId = `REPLAY-${run.id}-${Date.parse(run.startedAt)}-${run.restartCount}`;
   const previous = replays.get(replayId);
-  const dataset = exportRunToReplayDataset(run);
   const meta: ReplayCatalogueEntry = {
     id: replayId, name: `${run.scenario.name} · ${run.id}`,
     scenarioId: run.scenario.id, createdAt: previous?.meta.createdAt ?? new Date().toISOString(),
@@ -1240,6 +1241,9 @@ export function saveRunAsReplay(run: SimRun): ReplayCatalogueEntry {
     detectionsCount: run.events.filter(e => e.type === 'FRAME_INFERRED').length,
     source: run.mode === 'REPLAY' ? 'RECORDED' : 'SIMULATION',
   };
+  // On Vercel the request handler saves the run and archive together in Blob.
+  if (process.env.VERCEL) return meta;
+  const dataset = exportRunToReplayDataset(run);
   const item = { meta, dataset };
   replays.set(replayId, item);
   try {
@@ -1270,6 +1274,7 @@ function stopTimer(runId: string): void {
 }
 
 function startTimer(run: SimRun): void {
+  if (process.env.VERCEL) return;
   stopTimer(run.id);
   timers.set(run.id, setInterval(() => {
     if (run.mode === 'REPLAY') replayTick(run.id);
@@ -1284,7 +1289,7 @@ export function createRun(scenarioId: string, speed = 1, inference?: InferenceFn
   // In tests with fakeInference, keep reproducible default 20260922; otherwise randomize seed unless specified
   const seed = runSeed ?? (inference ? 20260922 : (Date.now() % 1_000_000 + Math.floor(Math.random() * 9999)));
   const scenario = factory(seed);
-  const id = `SIM-RUN-${String(++runCounter).padStart(4, '0')}`;
+  const id = process.env.VERCEL ? `SIM-RUN-${randomUUID()}` : `SIM-RUN-${String(++runCounter).padStart(4, '0')}`;
   const run: SimRun = {
     id, scenario, mode: scenario.mode, state: 'RUNNING', tS: 0, speed, restartCount: 0,
     startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -1437,7 +1442,7 @@ export function createReplayRun(speed = 60): SimRun {
     return Number.isFinite(at) ? Math.max(latest, at) : latest;
   }, endMs);
   const durationS = Math.max(0, Math.max(endMs, lastIngestionMs) - startMs) / 1000;
-  const id = `SIM-RUN-${String(++runCounter).padStart(4, '0')}`;
+  const id = process.env.VERCEL ? `SIM-RUN-${randomUUID()}` : `SIM-RUN-${String(++runCounter).padStart(4, '0')}`;
   const scenario: ScenarioConfig = {
     id: 'REPLAY-MSN-0001',
     name: String(tables.missions[0].name ?? 'Recorded mission replay'),
@@ -1570,6 +1575,253 @@ export function sourceModes() {
 
 // ── Express router ───────────────────────────────────────────────────────────
 export const simulationRouter = Router();
+
+// A Vercel invocation may be discarded after its response, or a later request
+// may land on another instance. Keep the authoritative run and its recordings
+// in one private Blob object; the browser's existing poll drives the clock.
+interface DurableRun {
+  run: SimRun;
+  wallClockMs: number;
+  archives: Record<string, { meta: ReplayCatalogueEntry; dataset: any }>;
+  hiddenArchives: string[];
+}
+
+const blobPrefix = 'oceanguard/simulation/runs/';
+const blobRunPath = (id: string) => `${blobPrefix}${id}.json`;
+const blobRunId = /^SIM-RUN-(?:[0-9a-f]{8}-[0-9a-f-]{27,}|\d{4,})$/i;
+const instanceLocks = new Map<string, Promise<void>>();
+
+function jsonReplacer(_key: string, value: any): any {
+  if (value instanceof Map) return { __simType: 'Map', entries: [...value] };
+  if (value instanceof Set) return { __simType: 'Set', values: [...value] };
+  return value;
+}
+
+function jsonReviver(_key: string, value: any): any {
+  if (value?.__simType === 'Map') return new Map(value.entries);
+  if (value?.__simType === 'Set') return new Set(value.values);
+  return value;
+}
+
+async function readDurableRun(id: string): Promise<{ value: DurableRun; etag: string } | null> {
+  if (!blobRunId.test(id)) return null;
+  const blob = await getBlob(blobRunPath(id), { access: 'private', useCache: false });
+  if (!blob?.stream) return null;
+  const value = JSON.parse(await new globalThis.Response(blob.stream).text(), jsonReviver) as DurableRun;
+  return { value, etag: blob.blob.etag };
+}
+
+async function writeDurableRun(value: DurableRun, etag?: string): Promise<void> {
+  await putBlob(blobRunPath(value.run.id), JSON.stringify(value, jsonReplacer), {
+    access: 'private', contentType: 'application/json',
+    ...(etag ? { allowOverwrite: true, ifMatch: etag } : {}),
+  });
+}
+
+async function listDurableRuns(): Promise<DurableRun[]> {
+  const result: DurableRun[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listBlobs({ prefix: blobPrefix, cursor, limit: 50 });
+    const runs = await Promise.all(page.blobs.map(async blob => {
+      const id = blob.pathname.slice(blobPrefix.length).replace(/\.json$/, '');
+      return (await readDurableRun(id))?.value;
+    }));
+    result.push(...runs.filter((run): run is DurableRun => Boolean(run)));
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+  return result;
+}
+
+function archiveCurrent(value: DurableRun, explicit = false): ReplayCatalogueEntry {
+  const run = value.run;
+  const meta = saveRunAsReplay(run);
+  meta.createdAt = value.archives[meta.id]?.meta.createdAt ?? meta.createdAt;
+  if (explicit) value.hiddenArchives = value.hiddenArchives.filter(id => id !== meta.id);
+  if (!value.hiddenArchives.includes(meta.id) && (explicit || meta.detectionsCount > 0)) {
+    value.archives[meta.id] = { meta, dataset: exportRunToReplayDataset(run) };
+  }
+  return meta;
+}
+
+async function advanceDurable(value: DurableRun): Promise<boolean> {
+  const run = value.run;
+  if (run.state !== 'RUNNING') return false;
+  const now = Date.now();
+  const elapsedS = Math.max(0, (now - value.wallClockMs) / 1000);
+  if (elapsedS < 0.05) return false;
+  // ponytail: bounded inference catch-up keeps one HTTP poll within the
+  // function budget; a worker is needed if high-speed playback is required.
+  const seconds = run.mode === 'REPLAY' ? elapsedS * run.speed : Math.min(elapsedS * run.speed, 3);
+  await advanceRun(run, seconds, false);
+  value.wallClockMs = run.state === 'RUNNING' && run.mode !== 'REPLAY'
+    ? value.wallClockMs + (seconds / run.speed) * 1000 : now;
+  archiveCurrent(value);
+  return true;
+}
+
+async function withDurableRun(
+  id: string,
+  operation: (value: DurableRun) => Promise<{ result: any; changed?: boolean }>,
+): Promise<any | null> {
+  if (!blobRunId.test(id)) return null;
+  // Serialize requests sharing one warm instance; ETag covers other instances.
+  const previous = instanceLocks.get(id) ?? Promise.resolve();
+  let release!: () => void;
+  const lock = new Promise<void>(resolve => { release = resolve; });
+  const queued = previous.then(() => lock);
+  instanceLocks.set(id, queued);
+  await previous;
+  try {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const stored = await readDurableRun(id);
+      if (!stored) return null;
+      const value = stored.value;
+      const advanced = await advanceDurable(value);
+      const { result, changed } = await operation(value);
+      if (!advanced && !changed) return result;
+      try {
+        await writeDurableRun(value, stored.etag);
+        return result;
+      } catch (error) {
+        if (!(error instanceof BlobPreconditionFailedError) || attempt === 3) throw error;
+      }
+    }
+    throw new Error('Run changed too often to save.');
+  } finally {
+    release();
+    if (instanceLocks.get(id) === queued) instanceLocks.delete(id);
+  }
+}
+
+function badRun(res: Response): void {
+  res.status(404).json({ message: 'Run not found.' });
+}
+
+async function vercelSimulationRoute(req: Request, res: Response, next: () => void): Promise<void> {
+  if (!process.env.VERCEL || req.path === '/modes' || req.path === '/scenarios') { next(); return; }
+  try {
+    if (req.path === '/runs' && req.method === 'GET') {
+      const records = await listDurableRuns();
+      res.json({ runs: records.map(({ run }) => ({
+        id: run.id, state: run.state, mode: run.mode, tS: Math.round(run.tS * 10) / 10,
+        speed: run.speed, scenarioId: run.scenario.id, name: run.scenario.name,
+      })) });
+      return;
+    }
+    if (req.path === '/runs' && req.method === 'POST') {
+      const { scenarioId, speed } = req.body as { scenarioId?: string; speed?: number };
+      if (!scenarioId || (scenarioId !== 'REPLAY-MSN-0001' && !SCENARIO_IDS.includes(scenarioId))) {
+        res.status(400).json({ message: 'Unknown scenario.' });
+        return;
+      }
+      const run = scenarioId === 'REPLAY-MSN-0001'
+        ? createReplayRun(Number(speed) || 60)
+        : createRun(scenarioId, Number(speed) || 1);
+      const value: DurableRun = { run, wallClockMs: Date.now(), archives: {}, hiddenArchives: [] };
+      await writeDurableRun(value);
+      runs.delete(run.id);
+      res.status(201).json({ run: runView(run) });
+      return;
+    }
+    if (req.path === '/replays' && req.method === 'GET') {
+      const records = await listDurableRuns();
+      const catalogue = [replays.get('REPLAY-01')!.meta,
+        ...records.flatMap(record => Object.values(record.archives).map(item => item.meta))];
+      res.json({ replays: catalogue });
+      return;
+    }
+    const replayMatch = req.path.match(/^\/replays\/(.+)$/);
+    if (replayMatch) {
+      const id = replayMatch[1];
+      if (id === 'REPLAY-01' && req.method === 'GET') {
+        res.json(loadReplayDataset());
+        return;
+      }
+      const runId = id.match(/^REPLAY-(SIM-RUN-[0-9a-f-]+)-\d+-\d+$/i)?.[1];
+      if (!runId) { badRun(res); return; }
+      const result = await withDurableRun(runId, async value => {
+        const item = value.archives[id];
+        if (!item) return { result: null };
+        if (req.method === 'DELETE') {
+          delete value.archives[id];
+          value.hiddenArchives.push(id);
+          return { result: { ok: true, deleted: id }, changed: true };
+        }
+        return { result: item.dataset };
+      });
+      if (!result) { badRun(res); return; }
+      res.json(result);
+      return;
+    }
+    const runMatch = req.path.match(/^\/runs\/(SIM-RUN-[0-9a-f-]+)(?:\/(.*))?$/i);
+    if (!runMatch) { next(); return; }
+    const [, id, action = ''] = runMatch;
+    const response = await withDurableRun(id, async value => {
+      const run = value.run;
+      runs.set(id, run);
+      try {
+        if (req.method === 'GET' && !action) return { result: { run: runView(run) } };
+        if (req.method === 'GET' && action === 'events') {
+          const since = Number(req.query.since) || 0;
+          return { result: {
+            state: run.state, recordingError: null, events: publicEvents(run, since),
+            cursor: { tS: Math.round(run.tS * 10) / 10, lastEventId: run.internal.nextEventId - 1 },
+            health: run.health,
+          } };
+        }
+        if (req.method === 'GET' && action === 'metrics') {
+          return { result: { metrics: run.mode === 'REPLAY'
+            ? { available: false, reason: 'Replay contains recorded simulated detections, not model output.' }
+            : run.metrics ?? computeMetrics(run) } };
+        }
+        if (req.method === 'POST' && action === 'save-replay') {
+          const meta = archiveCurrent(value, true);
+          return { result: { ok: true, replay: meta }, changed: true };
+        }
+        if (req.method === 'POST' && action === 'review') {
+          const { trackId, detectionId, verdict, correctedClass, note } = req.body;
+          if (!['CONFIRMED', 'FALSE_POSITIVE', 'CORRECTED'].includes(verdict)) {
+            return { result: { error: 400, message: 'Verdict must be CONFIRMED, FALSE_POSITIVE, or CORRECTED.' } };
+          }
+          if (trackId && run.internal.tracks.has(trackId)) run.internal.tracks.get(trackId)!.reviewStatus = verdict;
+          push(run, {
+            tS: run.tS, captureTime: null, type: 'OPERATOR_ACTION',
+            provenance: run.mode === 'REPLAY' ? 'RECORDED' : 'SIMULATED',
+            trackId, detectionId, reviewStatus: verdict,
+            message: `Operator review submitted: ${verdict}${note ? ` — ${note}` : ''}${correctedClass ? ` (corrected class: ${correctedClass})` : ''}`,
+          });
+          archiveCurrent(value);
+          return { result: { ok: true, verdict, trackId, detectionId }, changed: true };
+        }
+        let updated: SimRun | null = null;
+        if (req.method === 'POST' && action === 'pause') updated = pauseRun(id);
+        else if (req.method === 'POST' && action === 'resume') updated = resumeRun(id);
+        else if (req.method === 'POST' && action === 'restart') updated = restartRun(id);
+        else if (req.method === 'POST' && action === 'abort') updated = abortRun(id);
+        else if (req.method === 'PATCH' && !action) updated = setSpeed(id, Number(req.body.speed));
+        else return { result: { error: 404, message: 'API route not found.' } };
+        if (!updated) return { result: { error: 409, message: 'Run cannot be changed in its current state.' } };
+        if (action === 'resume' || action === 'restart') value.wallClockMs = Date.now();
+        archiveCurrent(value);
+        return { result: { run: runView(updated) }, changed: true };
+      } finally {
+        runs.delete(id);
+      }
+    });
+    if (!response) { badRun(res); return; }
+    if (typeof response === 'object' && 'error' in response) {
+      res.status(response.error as number).json({ message: response.message });
+      return;
+    }
+    res.json(response);
+  } catch (error) {
+    console.error('Durable simulation request failed:', error);
+    res.status(503).json({ message: 'Monitoring storage is temporarily unavailable. Please try again.' });
+  }
+}
+
+simulationRouter.use((req, res, next) => { void vercelSimulationRoute(req, res, next); });
 
 simulationRouter.get('/modes', (_req: Request, res: Response) => res.json(sourceModes()));
 
